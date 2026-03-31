@@ -86,7 +86,7 @@ destroy_cluster() {
         exit 1
     fi
 
-    "$OPENSHIFT_INSTALL" destroy cluster --dir="$INSTALL_DIR" --log-level=info
+    "$OPENSHIFT_INSTALL" destroy cluster --dir="$INSTALL_DIR" --log-level=debug
     log_success "Cluster destroyed"
 }
 
