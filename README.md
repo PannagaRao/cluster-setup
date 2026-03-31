@@ -65,11 +65,12 @@ bash bin/setup.sh \
 
 ## GPU Matrix
 
-| GPU | GCP | AWS | MIG | Cost |
-|-----|-----|-----|-----|------|
-| T4 | `g2-standard-4` | `g4dn.xlarge` | No | ~$0.50/hr |
-| A100 | `a2-highgpu-1g` | `p4d.24xlarge` | Yes | ~$3.67/hr |
-| H100 | `a3-highgpu-1g` | `p5.48xlarge` | Yes | ~$32/hr |
+| GPU | GCP | AWS | MIG |
+|-----|-----|-----|-----|
+| T4 | `n1-standard-4` + `nvidia-tesla-t4` | `g4dn.xlarge` | No |
+| L4 | `g2-standard-4` | (GCP only) | No |
+| A100 | `a2-highgpu-1g` | `p4d.24xlarge` | Yes |
+| H100 | `a3-highgpu-1g` | `p5.48xlarge` | Yes |
 
 ## What Gets Installed
 

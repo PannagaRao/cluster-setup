@@ -6,7 +6,7 @@ You are an interactive assistant that sets up an OpenShift 4.21 cluster with NVI
 
 Ask the user for:
 1. **Cloud**: `aws` or `gcp`
-2. **GPU type**: `t4`, `a100`, or `h100`
+2. **GPU type**: `t4`, `l4` (GCP only), `a100`, or `h100`
 3. **Cluster name**: short name (e.g. `my-gpu-test`)
 4. **Pull secret path**: path to their pull-secret.json file
 5. **OCP version**: default `4.21.0`, or the version they want

@@ -114,7 +114,84 @@ create_cluster() {
     log_phase "Monitoring Worker Provisioning"
     monitor_worker_provisioning "$cloud" "$gpu" 1800
 
+    # Patch MachineSet for GPU accelerator if needed (GCP T4)
+    if needs_machineset_gpu_patch "$cloud" "$gpu"; then
+        patch_machineset_gpu_accelerator "$cloud" "$gpu"
+    fi
+
     # Final verification
     log_info "Cluster nodes:"
     oc get nodes
+}
+
+# Patch worker MachineSet to add GPU accelerator
+# Required for GCP T4: install-config accelerator field is ignored by the installer
+patch_machineset_gpu_accelerator() {
+    local cloud="$1" gpu="$2"
+
+    log_phase "Patching MachineSet for GPU Accelerator"
+
+    local accelerator_type
+    accelerator_type=$(get_gcp_accelerator_type "$gpu")
+    if [[ -z "$accelerator_type" ]]; then
+        log_info "No accelerator patch needed for ${gpu}"
+        return 0
+    fi
+
+    # Get the worker MachineSet name
+    local machineset
+    machineset=$(oc get machinesets -n openshift-machine-api \
+        -l machine.openshift.io/cluster-api-machine-role=worker \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+
+    if [[ -z "$machineset" ]]; then
+        log_error "No worker MachineSet found"
+        return 1
+    fi
+
+    log_info "Patching MachineSet ${machineset} with accelerator: ${accelerator_type}"
+
+    # Scale down to 0 first — existing machines don't have GPU
+    oc scale machineset "$machineset" -n openshift-machine-api --replicas=0
+    log_info "Scaled down MachineSet to 0, waiting for machines to terminate..."
+
+    # Wait for old machines to be deleted
+    local elapsed=0
+    while (( elapsed < 300 )); do
+        local count
+        count=$(oc get machines -n openshift-machine-api \
+            -l machine.openshift.io/cluster-api-machine-role=worker \
+            --no-headers 2>/dev/null | wc -l)
+        if (( count == 0 )); then
+            break
+        fi
+        sleep 10
+        elapsed=$(( elapsed + 10 ))
+    done
+
+    # Patch the MachineSet to add GPU accelerator
+    if [[ "$cloud" == "gcp" ]]; then
+        oc patch machineset "$machineset" -n openshift-machine-api --type=json -p "[
+            {
+                \"op\": \"add\",
+                \"path\": \"/spec/template/spec/providerSpec/value/gpus\",
+                \"value\": [{\"count\": 1, \"type\": \"${accelerator_type}\"}]
+            },
+            {
+                \"op\": \"replace\",
+                \"path\": \"/spec/template/spec/providerSpec/value/onHostMaintenance\",
+                \"value\": \"Terminate\"
+            }
+        ]"
+    fi
+
+    log_success "MachineSet patched with ${accelerator_type}"
+
+    # Scale back up
+    oc scale machineset "$machineset" -n openshift-machine-api --replicas=1
+    log_info "Scaled MachineSet back to 1, waiting for GPU worker node..."
+
+    # Wait for new worker with GPU to be Ready
+    wait_for_nodes_ready 1200 1
+    log_success "GPU worker node is Ready"
 }

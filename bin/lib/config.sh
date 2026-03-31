@@ -6,10 +6,12 @@ set -euo pipefail
 # GPU Instance Matrix
 # ============================================================
 # Returns instance type for a given cloud+gpu combination
+# Note: GCP T4 uses n1-standard-4 base + accelerator (not a dedicated GPU instance)
 get_instance_type() {
     local cloud="$1" gpu="$2"
     case "${cloud}-${gpu}" in
-        gcp-t4)   echo "g2-standard-4" ;;
+        gcp-t4)   echo "n1-standard-4" ;;  # T4 attached as accelerator post-install
+        gcp-l4)   echo "g2-standard-4" ;;  # L4 is built into g2 instance
         gcp-a100) echo "a2-highgpu-1g" ;;
         gcp-h100) echo "a3-highgpu-1g" ;;
         aws-t4)   echo "g4dn.xlarge" ;;
@@ -19,11 +21,28 @@ get_instance_type() {
     esac
 }
 
+# Returns GCP accelerator type for GPU (empty if GPU is built into instance type)
+get_gcp_accelerator_type() {
+    local gpu="$1"
+    case "$gpu" in
+        t4) echo "nvidia-tesla-t4" ;;
+        *)  echo "" ;;  # l4/a100/h100 are dedicated GPU instance types, no accelerator needed
+    esac
+}
+
+# Returns true if this cloud+gpu combo needs post-install MachineSet patching for GPU
+needs_machineset_gpu_patch() {
+    local cloud="$1" gpu="$2"
+    # GCP T4: accelerator field in install-config is ignored, must patch MachineSet
+    [[ "$cloud" == "gcp" && "$gpu" == "t4" ]]
+}
+
 # Returns vCPU count for the instance type (needed for quota checks)
 get_instance_vcpus() {
     local cloud="$1" gpu="$2"
     case "${cloud}-${gpu}" in
         gcp-t4)   echo 4 ;;
+        gcp-l4)   echo 4 ;;
         gcp-a100) echo 12 ;;
         gcp-h100) echo 26 ;;  # a3-highgpu-1g
         aws-t4)   echo 4 ;;
@@ -38,6 +57,7 @@ get_gpu_count() {
     local cloud="$1" gpu="$2"
     case "${cloud}-${gpu}" in
         gcp-t4)   echo 1 ;;
+        gcp-l4)   echo 1 ;;
         gcp-a100) echo 1 ;;
         gcp-h100) echo 1 ;;  # a3-highgpu-1g = 1 H100
         aws-t4)   echo 1 ;;
@@ -54,7 +74,7 @@ gpu_supports_mig() {
     local gpu="$1"
     case "$gpu" in
         a100|h100) return 0 ;;
-        *) return 1 ;;
+        *)         return 1 ;;  # t4, l4 do not support MIG
     esac
 }
 
@@ -78,6 +98,7 @@ get_zone_priority() {
     local cloud="$1" gpu="$2"
     case "${cloud}-${gpu}" in
         gcp-t4)   echo "us-central1-a us-central1-b us-central1-c us-east1-b us-east1-c us-east1-d" ;;
+        gcp-l4)   echo "us-central1-a us-central1-b us-central1-c us-east1-b us-east1-c us-west1-a" ;;
         gcp-a100) echo "us-central1-f us-central1-a us-central1-b us-central1-c us-west1-b us-east1-b" ;;
         gcp-h100) echo "us-central1-a us-central1-b us-central1-c europe-west1-b europe-west1-c us-west1-a" ;;
         aws-t4)   echo "ap-south-1a ap-south-1b ap-south-1c us-east-1a us-east-1b us-east-1c" ;;

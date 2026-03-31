@@ -11,11 +11,12 @@ Claude Code workspace for setting up OpenShift clusters with NVIDIA GPUs and DRA
 
 ## GPU Instance Matrix
 
-| GPU  | GCP Instance      | AWS Instance    | GPUs | MIG | Cost   |
-|------|-------------------|-----------------|------|-----|--------|
-| T4   | g2-standard-4     | g4dn.xlarge     | 1    | No  | ~$0.50/hr |
-| A100 | a2-highgpu-1g     | p4d.24xlarge    | 1/8  | Yes | ~$3.67/hr (GCP) |
-| H100 | a3-highgpu-1g     | p5.48xlarge     | 1/8  | Yes | ~$32/hr (AWS) |
+| GPU  | GCP Instance      | AWS Instance    | GPUs | MIG |
+|------|-------------------|-----------------|------|-----|
+| T4   | n1-standard-4 + nvidia-tesla-t4 accelerator | g4dn.xlarge | 1 | No |
+| L4   | g2-standard-4     | (GCP only)      | 1    | No  |
+| A100 | a2-highgpu-1g     | p4d.24xlarge    | 1/8  | Yes |
+| H100 | a3-highgpu-1g     | p5.48xlarge     | 1/8  | Yes |
 
 ### Quota Status (as of March 2026)
 
@@ -46,7 +47,7 @@ Each phase has active monitoring: polls until success or timeout, surfaces pod l
 
 These are hard-won lessons — do not remove without understanding why they exist:
 
-1. **install-config accelerators field is ignored** — GPU instance type must be set as the worker machine type directly. The accelerators field in install-config.yaml does nothing.
+1. **install-config accelerators field is ignored** — for GCP T4, the accelerator field in install-config.yaml is silently ignored by the installer. The cluster must be created with `n1-standard-4` (no GPU), then the worker MachineSet is patched post-install to add `nvidia-tesla-t4` accelerator with `onHostMaintenance: Terminate`. The old worker is scaled down, patched, and scaled back up. A100/H100 use dedicated GPU instance types (a2/a3) so this is only needed for T4.
 
 2. **devicePlugin.enabled=false** — MUST be false in GPU Operator when using DRA. If left true, the standard device plugin conflicts with the DRA driver.
 

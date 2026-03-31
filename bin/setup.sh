@@ -23,7 +23,7 @@ Create an OpenShift cluster with NVIDIA GPUs and DRA support.
 Required:
   --cluster-name NAME     Cluster name
   --cloud CLOUD            Cloud provider: gcp, aws
-  --gpu GPU                GPU type: t4, a100, h100
+  --gpu GPU                GPU type: t4, l4, a100, h100
   --pull-secret PATH       Path to pull-secret.json
 
 Optional:
@@ -107,8 +107,14 @@ if [[ "$CLOUD" != "gcp" && "$CLOUD" != "aws" ]]; then
 fi
 
 # Validate GPU
-if [[ "$GPU" != "t4" && "$GPU" != "a100" && "$GPU" != "h100" ]]; then
-    log_error "Invalid GPU: $GPU (must be t4, a100, or h100)"
+if [[ "$GPU" != "t4" && "$GPU" != "l4" && "$GPU" != "a100" && "$GPU" != "h100" ]]; then
+    log_error "Invalid GPU: $GPU (must be t4, l4, a100, or h100)"
+    exit 1
+fi
+
+# Validate cloud+GPU combo
+if [[ "$GPU" == "l4" && "$CLOUD" != "gcp" ]]; then
+    log_error "L4 is only available on GCP (g2-standard-4)"
     exit 1
 fi
 

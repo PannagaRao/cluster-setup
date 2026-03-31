@@ -21,6 +21,10 @@ check_gcp_quota() {
     case "$gpu" in
         t4)
             gpu_metric="NVIDIA_T4_GPUS"
+            cpu_metric=""
+            ;;
+        l4)
+            gpu_metric="NVIDIA_L4_GPUS"
             cpu_metric=""  # g2 uses standard CPU quota
             ;;
         a100)
