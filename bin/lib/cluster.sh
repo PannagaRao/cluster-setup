@@ -24,15 +24,41 @@ setup_gcp_service_account() {
         gcloud iam service-accounts create "$sa_name" \
             --display-name="$sa_name" \
             --project="$GCP_PROJECT"
-
-        # Grant required roles
-        for role in compute.admin dns.admin iam.serviceAccountUser storage.admin; do
-            gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-                --member="serviceAccount:${sa_email}" \
-                --role="roles/${role}" --quiet &>/dev/null
-        done
-        log_success "Service account created with required roles"
+        # Wait for SA to propagate
+        sleep 5
     fi
+
+    # Grant required roles (with retry for eventual consistency)
+    local roles=(
+        compute.admin
+        dns.admin
+        iam.serviceAccountUser
+        iam.securityAdmin
+        iam.serviceAccountAdmin
+        iam.serviceAccountKeyAdmin
+        iam.roleAdmin
+        storage.admin
+        compute.loadBalancerAdmin
+    )
+    for role in "${roles[@]}"; do
+        local retries=5 wait_time=5
+        for ((i=1; i<=retries; i++)); do
+            if gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+                --member="serviceAccount:${sa_email}" \
+                --role="roles/${role}" \
+                --condition=None --quiet &>/dev/null; then
+                break
+            fi
+            if ((i == retries)); then
+                log_error "Failed to add role ${role} after ${retries} retries"
+                return 1
+            fi
+            log_warn "Retrying role ${role} in ${wait_time}s... (${i}/${retries})"
+            sleep "$wait_time"
+            wait_time=$((wait_time * 2))
+        done
+    done
+    log_success "Service account roles granted"
 
     # Export key if not present
     if [[ ! -f "$key_path" ]]; then
