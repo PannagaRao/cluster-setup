@@ -86,7 +86,14 @@ destroy_cluster() {
         exit 1
     fi
 
+    # Tail the install log in the background so destroy progress is visible
+    touch "${INSTALL_DIR}/.openshift_install.log"
+    tail -f "${INSTALL_DIR}/.openshift_install.log" &
+    local tail_pid=$!
+
     "$OPENSHIFT_INSTALL" destroy cluster --dir="$INSTALL_DIR" --log-level=debug
+
+    kill "$tail_pid" 2>/dev/null || true
     log_success "Cluster destroyed"
 }
 
