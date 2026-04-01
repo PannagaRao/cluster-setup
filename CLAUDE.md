@@ -30,6 +30,12 @@ Claude Code workspace for setting up OpenShift clusters with NVIDIA GPUs and DRA
 - A100: 692 P-instance vCPUs — works
 - H100: 692 P-instance vCPUs — works
 
+### H100 Setup Strategy
+
+When H100 is requested and GCP quota check fails:
+1. Suggest AWS instead of A100 downgrade — AWS p5.48xlarge is more readily available
+2. Before starting setup, check zone availability with: `aws ec2 describe-instance-type-offerings --filters "Name=instance-type,Values=p5.48xlarge" --region <REGION>`
+
 ## Setup Phases (in order)
 
 1. **Quota check** — verify cloud has enough GPU/CPU quota
