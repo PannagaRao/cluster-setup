@@ -149,7 +149,7 @@ monitor_worker_provisioning() {
 
         # Check for failed machines
         local failed_machines
-        failed_machines=$(oc get machines -n openshift-machine-api \
+        failed_machines=$(oc get machines.machine.openshift.io -n openshift-machine-api \
             -l machine.openshift.io/cluster-api-machine-role=worker \
             -o json 2>/dev/null | python3 -c "
 import json, sys
@@ -183,13 +183,13 @@ for m in data.get('items', []):
 
                 # Get the worker MachineSet name
                 local machineset
-                machineset=$(oc get machinesets -n openshift-machine-api \
+                machineset=$(oc get machinesets.machine.openshift.io -n openshift-machine-api \
                     -l machine.openshift.io/cluster-api-machine-role=worker \
                     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
                 if [[ -n "$machineset" ]]; then
                     # Delete failed machines
-                    oc get machines -n openshift-machine-api \
+                    oc get machines.machine.openshift.io -n openshift-machine-api \
                         -l machine.openshift.io/cluster-api-machine-role=worker \
                         -o name 2>/dev/null | while read -r m; do
                         local phase
@@ -202,12 +202,12 @@ for m in data.get('items', []):
 
                     # Patch MachineSet with new zone
                     if [[ "$cloud" == "gcp" ]]; then
-                        oc patch machineset "$machineset" -n openshift-machine-api --type=merge \
+                        oc patch machineset.machine.openshift.io "$machineset" -n openshift-machine-api --type=merge \
                             -p "{\"spec\":{\"template\":{\"spec\":{\"providerSpec\":{\"value\":{\"zone\":\"${new_zone}\"}}}}}}" 2>/dev/null
                     elif [[ "$cloud" == "aws" ]]; then
                         local new_region
                         new_region=$(get_region_from_zone "$cloud" "$new_zone")
-                        oc patch machineset "$machineset" -n openshift-machine-api --type=merge \
+                        oc patch machineset.machine.openshift.io "$machineset" -n openshift-machine-api --type=merge \
                             -p "{\"spec\":{\"template\":{\"spec\":{\"providerSpec\":{\"value\":{\"placement\":{\"availabilityZone\":\"${new_zone}\",\"region\":\"${new_region}\"}}}}}}}}" 2>/dev/null
                     fi
                     log_info "MachineSet patched to zone: ${new_zone}. Waiting for new machine..."
@@ -221,7 +221,7 @@ for m in data.get('items', []):
     done
     echo ""
     log_error "Timed out waiting for worker node"
-    oc get machines -n openshift-machine-api 2>/dev/null || true
+    oc get machines.machine.openshift.io -n openshift-machine-api 2>/dev/null || true
     return 1
 }
 

@@ -166,7 +166,7 @@ patch_machineset_gpu_accelerator() {
 
     # Get the worker MachineSet name
     local machineset
-    machineset=$(oc get machinesets -n openshift-machine-api \
+    machineset=$(oc get machines.machine.openshift.ioets.machine.openshift.io -n openshift-machine-api \
         -l machine.openshift.io/cluster-api-machine-role=worker \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
@@ -178,14 +178,14 @@ patch_machineset_gpu_accelerator() {
     log_info "Patching MachineSet ${machineset} with accelerator: ${accelerator_type}"
 
     # Scale down to 0 first — existing machines don't have GPU
-    oc scale machineset "$machineset" -n openshift-machine-api --replicas=0
+    oc scale machineset.machine.openshift.io "$machineset" -n openshift-machine-api --replicas=0
     log_info "Scaled down MachineSet to 0, waiting for machines to terminate..."
 
     # Wait for old machines to be deleted
     local elapsed=0
     while (( elapsed < 300 )); do
         local count
-        count=$(oc get machines -n openshift-machine-api \
+        count=$(oc get machines.machine.openshift.io -n openshift-machine-api \
             -l machine.openshift.io/cluster-api-machine-role=worker \
             --no-headers 2>/dev/null | wc -l)
         if (( count == 0 )); then
@@ -197,7 +197,7 @@ patch_machineset_gpu_accelerator() {
 
     # Patch the MachineSet to add GPU accelerator
     if [[ "$cloud" == "gcp" ]]; then
-        oc patch machineset "$machineset" -n openshift-machine-api --type=merge -p '{
+        oc patch machineset.machine.openshift.io "$machineset" -n openshift-machine-api --type=merge -p '{
             "spec": {
                 "template": {
                     "spec": {
@@ -221,7 +221,7 @@ patch_machineset_gpu_accelerator() {
     log_success "MachineSet patched with ${accelerator_type}"
 
     # Scale back up
-    oc scale machineset "$machineset" -n openshift-machine-api --replicas=1
+    oc scale machineset.machine.openshift.io "$machineset" -n openshift-machine-api --replicas=1
     log_info "Scaled MachineSet back to 1, waiting for GPU worker node..."
 
     # Wait for new worker with GPU to be Ready
