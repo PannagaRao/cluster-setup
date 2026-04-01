@@ -13,6 +13,7 @@ source "${LIB_DIR}/cert-manager.sh"
 source "${LIB_DIR}/nfd.sh"
 source "${LIB_DIR}/gpu-operator.sh"
 source "${LIB_DIR}/dra-driver.sh"
+source "${LIB_DIR}/smoke-test.sh"
 
 usage() {
     cat <<EOF
