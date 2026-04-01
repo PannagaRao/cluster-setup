@@ -17,6 +17,7 @@ install_gpu_operator() {
     oc create namespace "$namespace" 2>/dev/null || true
 
     # Grant SCC to all required service accounts
+    # Includes GPU Operator's bundled NFD worker SA which needs hostPath volumes
     local service_accounts=(
         "nvidia-gpu-operator"
         "nvidia-driver-daemonset"
@@ -28,6 +29,7 @@ install_gpu_operator() {
         "nvidia-device-plugin-daemonset"
         "nvidia-operator-validator"
         "gpu-feature-discovery"
+        "node-feature-discovery"
     )
     for sa in "${service_accounts[@]}"; do
         oc adm policy add-scc-to-user privileged -n "$namespace" -z "$sa" 2>/dev/null || true
@@ -57,13 +59,13 @@ install_gpu_operator() {
         --set "dra.enabled=true" \
         --set "dra.structuredParameters.enabled=true" \
         $mig_set \
-        --wait --timeout 10m
+        --timeout 10m
 
     log_success "GPU Operator helm chart installed"
 
     # Wait for GPU driver pod on the worker node (driver compilation takes 5-10 min)
     log_info "Waiting for GPU driver to compile and load (this can take 5-10 minutes)..."
-    wait_for_pods_running "$namespace" "app=nvidia-driver-daemonset" 600
+    wait_for_pods_running "$namespace" "app.kubernetes.io/component=nvidia-driver" 600
 
     # Verify GPU operator validator passes
     wait_for_pods_running "$namespace" "app=nvidia-operator-validator" 300
