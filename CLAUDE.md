@@ -57,16 +57,20 @@ These are hard-won lessons — do not remove without understanding why they exis
 
 5. **SCC grants required** — OpenShift requires explicit Security Context Constraint grants for every NVIDIA service account. Missing grants cause pods to fail with permission denied.
 
-6. **MachineSet patching for zone fallback** — when a zone runs out of GPU capacity, patch the MachineSet's zone field and delete failed machines. The MachineSet controller will create new machines in the new zone.
+6. **MachineSet patching for zone fallback** — when a zone runs out of GPU capacity, patch the MachineSet's zone field and delete failed machines. The MachineSet controller will create new machines in the new zone. **Note:** Zone fallback only works within the same region. If all zones exhausted, destroy cluster and recreate in different region.
 
-7. **SharedCounterSets timing** — with DynamicMIG, ResourceSlice may take up to 60s to update after MIG partition creation. Tests should wait for ResourceSlice to show the partition.
+7. **Worker provisioning monitoring** — Setup script actively monitors worker machine creation with adaptive polling (15s for first 5min, then 30s) to detect capacity errors immediately, rather than waiting for timeout. Failed zones are auto-retried with fallback.
+
+8. **SharedCounterSets timing** — with DynamicMIG, ResourceSlice may take up to 60s to update after MIG partition creation. Tests should wait for ResourceSlice to show the partition.
 
 ## Error Recovery
 
 | Error | Cause | Fix |
 |-------|-------|-----|
 | Cluster create auth failure | Stale pull secret | Refresh at console.redhat.com |
-| No worker node after 20 min | GPU stockout in zone | Auto zone fallback handles this |
+| No worker node after 20 min | GPU stockout in zone | Auto zone fallback handles this; if all zones fail, try different region |
+| InsufficientInstanceCapacity | Regional capacity exhausted | Destroy cluster (`/teardown`) and recreate in different region |
+| Cluster initialization timeout | No worker nodes available | Wait for worker to join; check machine status if stuck >5min |
 | MCP Degraded | Feature gate conflict | Check `oc describe mcp`, may need to patch feature gates |
 | GPU driver pod stuck in Init | Kernel module build failure | Delete pod, check driver toolkit image |
 | No ResourceSlice | DRA driver permissions | Verify SCC grants for kubelet-plugin SA |

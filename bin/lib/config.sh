@@ -249,3 +249,25 @@ log_success() { echo -e "${GREEN}[OK]${NC} $*"; }
 log_warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $*"; }
 log_phase()   { echo -e "\n${GREEN}========================================${NC}"; echo -e "${GREEN} $*${NC}"; echo -e "${GREEN}========================================${NC}\n"; }
+
+# ============================================================
+# GPU Availability Checks
+# ============================================================
+# Check if instance type is available in any zone in the region (quiet mode)
+check_aws_available_quiet() {
+    local instance_type="$1" region="$2"
+
+    local zones
+    zones=$(aws ec2 describe-availability-zones --region "$region" --query 'AvailabilityZones[*].ZoneName' --output text 2>/dev/null) || return 1
+
+    for zone in $zones; do
+        aws ec2 describe-instance-type-offerings \
+            --region "$region" \
+            --location-type "availability-zone" \
+            --filters "Name=location,Values=$zone" "Name=instance-type,Values=$instance_type" \
+            --query 'InstanceTypeOfferings[0].InstanceType' \
+            --output text 2>/dev/null | grep -q "$instance_type" && return 0
+    done
+
+    return 1
+}

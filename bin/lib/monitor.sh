@@ -130,6 +130,7 @@ wait_for_resource() {
 
 # Monitor worker machine provisioning with zone fallback
 # Returns 0 if worker is ready, 1 if all zones exhausted
+# Fast polling (15s) for first 5min to catch capacity errors quickly
 monitor_worker_provisioning() {
     local cloud="$1" gpu="$2" timeout="${3:-1800}"  # 30 min default
     local zones zone_array current_zone_idx=0
@@ -137,7 +138,7 @@ monitor_worker_provisioning() {
     read -ra zone_array <<< "$zones"
 
     log_info "Monitoring worker provisioning (zones: ${zones})"
-    local elapsed=0
+    local elapsed=0 poll_interval=15
     while (( elapsed < timeout )); do
         # Check if any worker node is Ready
         local ready
@@ -147,7 +148,7 @@ monitor_worker_provisioning() {
             return 0
         fi
 
-        # Check for failed machines
+        # Check for failed machines (check fast for capacity errors in first 5 min)
         local failed_machines
         failed_machines=$(oc get machines.machine.openshift.io -n openshift-machine-api \
             -l machine.openshift.io/cluster-api-machine-role=worker \
@@ -158,30 +159,24 @@ for m in data.get('items', []):
     phase = m.get('status', {}).get('phase', '')
     name = m['metadata']['name']
     if phase == 'Failed':
-        # Check for capacity errors in conditions
         conditions = m.get('status', {}).get('conditions', [])
-        reason = ''
         for c in conditions:
-            if 'capacity' in c.get('message', '').lower() or 'insufficient' in c.get('message', '').lower() or 'stockout' in c.get('message', '').lower():
-                reason = c.get('message', '')
-        print(f'{name}|{reason}')
+            msg = c.get('message', '').lower()
+            if 'insufficient' in msg or 'capacity' in msg:
+                print(f'{name}|capacity')
+                break
 " 2>/dev/null || true)
 
         if [[ -n "$failed_machines" ]]; then
-            log_warn "Failed machine(s) detected:"
-            echo "$failed_machines"
-
-            # Check if it's a capacity issue
-            if echo "$failed_machines" | grep -qi "capacity\|insufficient\|stockout\|quota"; then
+            if echo "$failed_machines" | grep -q "capacity"; then
                 current_zone_idx=$(( current_zone_idx + 1 ))
                 if (( current_zone_idx >= ${#zone_array[@]} )); then
-                    log_error "All zones exhausted. No capacity available for $gpu."
+                    log_error "All zones exhausted for $gpu."
                     return 1
                 fi
                 local new_zone="${zone_array[$current_zone_idx]}"
-                log_warn "Capacity issue detected. Switching to zone: ${new_zone}"
+                log_warn "Capacity error detected. Trying zone: ${new_zone}"
 
-                # Get the worker MachineSet name
                 local machineset
                 machineset=$(oc get machinesets.machine.openshift.io -n openshift-machine-api \
                     -l machine.openshift.io/cluster-api-machine-role=worker \
@@ -195,33 +190,33 @@ for m in data.get('items', []):
                         local phase
                         phase=$(oc get "$m" -n openshift-machine-api -o jsonpath='{.status.phase}' 2>/dev/null || true)
                         if [[ "$phase" == "Failed" ]]; then
-                            log_info "Deleting failed machine: $m"
                             oc delete "$m" -n openshift-machine-api 2>/dev/null || true
                         fi
                     done
 
-                    # Patch MachineSet with new zone
-                    if [[ "$cloud" == "gcp" ]]; then
-                        oc patch machineset.machine.openshift.io "$machineset" -n openshift-machine-api --type=merge \
-                            -p "{\"spec\":{\"template\":{\"spec\":{\"providerSpec\":{\"value\":{\"zone\":\"${new_zone}\"}}}}}}" 2>/dev/null
-                    elif [[ "$cloud" == "aws" ]]; then
+                    # Patch MachineSet with new zone (AWS only for now)
+                    if [[ "$cloud" == "aws" ]]; then
                         local new_region
                         new_region=$(get_region_from_zone "$cloud" "$new_zone")
                         oc patch machineset.machine.openshift.io "$machineset" -n openshift-machine-api --type=merge \
-                            -p "{\"spec\":{\"template\":{\"spec\":{\"providerSpec\":{\"value\":{\"placement\":{\"availabilityZone\":\"${new_zone}\",\"region\":\"${new_region}\"}}}}}}}}" 2>/dev/null
+                            -p "{\"spec\":{\"template\":{\"spec\":{\"providerSpec\":{\"value\":{\"placement\":{\"availabilityZone\":\"${new_zone}\",\"region\":\"${new_region}\"}}}}}}}}" 2>/dev/null || true
                     fi
-                    log_info "MachineSet patched to zone: ${new_zone}. Waiting for new machine..."
                 fi
             fi
         fi
 
-        sleep 30
-        elapsed=$(( elapsed + 30 ))
-        echo -ne "\r  Elapsed: ${elapsed}s — waiting for worker node..."
+        # Adaptive polling: fast for first 5min, then slow down
+        if (( elapsed < 300 )); then
+            poll_interval=15
+        else
+            poll_interval=30
+        fi
+
+        sleep "$poll_interval"
+        elapsed=$(( elapsed + poll_interval ))
     done
     echo ""
-    log_error "Timed out waiting for worker node"
-    oc get machines.machine.openshift.io -n openshift-machine-api 2>/dev/null || true
+    log_error "Worker provisioning timed out after ${timeout}s"
     return 1
 }
 
