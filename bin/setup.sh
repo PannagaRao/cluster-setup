@@ -239,7 +239,7 @@ if should_run_phase "dra-driver"; then
 fi
 
 if should_run_phase "smoke-test"; then
-    run_smoke_test
+    run_smoke_test "$MIG_MODE"
 fi
 
 log_phase "Setup Complete!"
