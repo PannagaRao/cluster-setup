@@ -63,7 +63,29 @@ These are hard-won lessons — do not remove without understanding why they exis
 
 5. **SCC grants required** — OpenShift requires explicit Security Context Constraint grants for every NVIDIA service account. Missing grants cause pods to fail with permission denied.
 
-6. **MachineSet patching for zone fallback** — when a zone runs out of GPU capacity, patch the MachineSet's zone field and delete failed machines. The MachineSet controller will create new machines in the new zone. **Note:** Zone fallback only works within the same region. If all zones exhausted, destroy cluster and recreate in different region.
+6. **MachineSet patching for zone fallback** — when a zone runs out of GPU capacity, patch the MachineSet to a different zone within the same region. **Important:** you must also update the subnet filter to match the new zone, otherwise machine creation fails with "no subnet IDs found". The installer creates subnets in all AZs for the control plane, so valid subnets exist.
+
+   **AWS:**
+   ```bash
+   MACHINESET=$(oc get machineset -n openshift-machine-api -o jsonpath='{.items[0].metadata.name}')
+   # Patch zone
+   oc patch machineset $MACHINESET -n openshift-machine-api --type=merge \
+     -p '{"spec":{"template":{"spec":{"providerSpec":{"value":{"placement":{"availabilityZone":"<NEW_ZONE>"}}}}}}}'
+   # Patch subnet filter to match new zone
+   oc patch machineset $MACHINESET -n openshift-machine-api --type=json \
+     -p '[{"op":"replace","path":"/spec/template/spec/providerSpec/value/subnet/filters/0/values/0","value":"<CLUSTER_INFRA_ID>-subnet-private-<NEW_ZONE>"}]'
+   # Delete stuck machine so a new one is created
+   oc delete machine -n openshift-machine-api -l machine.openshift.io/cluster-api-machineset=$MACHINESET
+   oc get machines -n openshift-machine-api -w
+   ```
+
+   **GCP** (different path — `value.zone` instead of `value.placement.availabilityZone`):
+   ```bash
+   oc patch machineset $MACHINESET -n openshift-machine-api --type=merge \
+     -p '{"spec":{"template":{"spec":{"providerSpec":{"value":{"zone":"<NEW_ZONE>"}}}}}}'
+   ```
+
+   **Note:** Zone fallback only works within the same region. If all zones exhausted, destroy cluster (`/teardown`) and recreate in different region.
 
 7. **Worker provisioning monitoring** — Setup script actively monitors worker machine creation with adaptive polling (15s for first 5min, then 30s) to detect capacity errors immediately, rather than waiting for timeout. Failed zones are auto-retried with fallback.
 
