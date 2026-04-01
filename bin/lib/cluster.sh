@@ -197,18 +197,25 @@ patch_machineset_gpu_accelerator() {
 
     # Patch the MachineSet to add GPU accelerator
     if [[ "$cloud" == "gcp" ]]; then
-        oc patch machineset "$machineset" -n openshift-machine-api --type=json -p "[
-            {
-                \"op\": \"add\",
-                \"path\": \"/spec/template/spec/providerSpec/value/gpus\",
-                \"value\": [{\"count\": 1, \"type\": \"${accelerator_type}\"}]
-            },
-            {
-                \"op\": \"replace\",
-                \"path\": \"/spec/template/spec/providerSpec/value/onHostMaintenance\",
-                \"value\": \"Terminate\"
+        oc patch machineset "$machineset" -n openshift-machine-api --type=merge -p '{
+            "spec": {
+                "template": {
+                    "spec": {
+                        "providerSpec": {
+                            "value": {
+                                "gpus": [
+                                    {
+                                        "count": 1,
+                                        "type": "'"${accelerator_type}"'"
+                                    }
+                                ],
+                                "onHostMaintenance": "Terminate"
+                            }
+                        }
+                    }
+                }
             }
-        ]"
+        }'
     fi
 
     log_success "MachineSet patched with ${accelerator_type}"
