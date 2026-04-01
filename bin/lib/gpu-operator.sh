@@ -16,25 +16,6 @@ install_gpu_operator() {
     # Create namespace
     oc create namespace "$namespace" 2>/dev/null || true
 
-    # Grant SCC to all required service accounts
-    # Includes GPU Operator's bundled NFD worker SA which needs hostPath volumes
-    local service_accounts=(
-        "nvidia-gpu-operator"
-        "nvidia-driver-daemonset"
-        "nvidia-mig-manager"
-        "nvidia-node-status-exporter"
-        "nvidia-container-toolkit-daemonset"
-        "nvidia-dcgm"
-        "nvidia-dcgm-exporter"
-        "nvidia-device-plugin-daemonset"
-        "nvidia-operator-validator"
-        "gpu-feature-discovery"
-        "node-feature-discovery"
-    )
-    for sa in "${service_accounts[@]}"; do
-        oc adm policy add-scc-to-user privileged -n "$namespace" -z "$sa" 2>/dev/null || true
-    done
-
     # Add helm repo
     helm repo add nvidia https://helm.ngc.nvidia.com/nvidia 2>/dev/null || true
     helm repo update nvidia 2>/dev/null || true
@@ -49,7 +30,7 @@ install_gpu_operator() {
     # Install GPU Operator
     # CRITICAL: devicePlugin.enabled=false when using DRA
     # shellcheck disable=SC2086
-    helm upgrade --install gpu-operator nvidia/gpu-operator \
+    helm install gpu-operator nvidia/gpu-operator \
         --namespace "$namespace" \
         --version "$GPU_OPERATOR_CHART_VERSION" \
         --set "operator.defaultRuntime=crio" \
@@ -58,17 +39,25 @@ install_gpu_operator() {
         --set "devicePlugin.enabled=false" \
         --set "dra.enabled=true" \
         --set "dra.structuredParameters.enabled=true" \
-        $mig_set \
-        --timeout 10m
+        $mig_set
 
     log_success "GPU Operator helm chart installed"
 
-    # Wait for GPU driver pod on the worker node (driver compilation takes 5-10 min)
-    log_info "Waiting for GPU driver to compile and load (this can take 5-10 minutes)..."
-    wait_for_pods_running "$namespace" "app.kubernetes.io/component=nvidia-driver" 600
+    # Grant SCC to service accounts after install (SAs are created by the helm chart)
+    log_info "Granting SCC to GPU Operator service accounts..."
+    sleep 10
+    local service_accounts=(
+        "default"
+        "gpu-operator"
+        "nvidia-driver-daemonset"
+        "nvidia-container-toolkit-daemonset"
+        "nvidia-operator-validator"
+        "gpu-feature-discovery"
+        "node-feature-discovery"
+    )
+    for sa in "${service_accounts[@]}"; do
+        oc adm policy add-scc-to-user privileged -n "$namespace" -z "$sa" 2>/dev/null || true
+    done
 
-    # Verify GPU operator validator passes
-    wait_for_pods_running "$namespace" "app=nvidia-operator-validator" 300
-
-    log_success "GPU Operator installed and validated"
+    log_success "GPU Operator installed — driver compilation continues in background"
 }

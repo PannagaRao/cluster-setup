@@ -10,7 +10,7 @@ set -euo pipefail
 get_instance_type() {
     local cloud="$1" gpu="$2"
     case "${cloud}-${gpu}" in
-        gcp-t4)   echo "n1-standard-4" ;;  # T4 attached as accelerator post-install
+        gcp-t4)   echo "n1-standard-8" ;;  # T4 attached as accelerator post-install; 8 vCPUs for faster driver compilation
         gcp-l4)   echo "g2-standard-4" ;;  # L4 is built into g2 instance
         gcp-a100) echo "a2-highgpu-1g" ;;
         gcp-h100) echo "a3-highgpu-1g" ;;
@@ -41,7 +41,8 @@ needs_machineset_gpu_patch() {
 get_instance_vcpus() {
     local cloud="$1" gpu="$2"
     case "${cloud}-${gpu}" in
-        gcp-t4)   echo 4 ;;
+        gcp-t4)   echo 8 ;;
+
         gcp-l4)   echo 4 ;;
         gcp-a100) echo 12 ;;
         gcp-h100) echo 26 ;;  # a3-highgpu-1g

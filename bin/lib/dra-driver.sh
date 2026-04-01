@@ -53,17 +53,16 @@ install_dra_driver() {
 
     # Install DRA driver
     # shellcheck disable=SC2086
-    helm upgrade --install nvidia-dra-driver-gpu nvidia/nvidia-dra-driver-gpu \
+    helm install nvidia-dra-driver-gpu nvidia/nvidia-dra-driver-gpu \
         --namespace "$namespace" \
         --version "$DRA_DRIVER_CHART_VERSION" \
         -f "$values_file" \
-        $set_overrides \
-        --wait --timeout 10m
+        $set_overrides
 
     log_success "DRA driver helm chart installed (mode: ${mig_mode})"
 
     # Wait for DRA driver pods
-    wait_for_pods_running "$namespace" "app.kubernetes.io/name=nvidia-dra-driver-gpu" 300
+    wait_for_pods_running "$namespace" "app.kubernetes.io/name=nvidia-dra-driver-gpu" 1200
 
     # Verify DeviceClass exists
     log_info "Checking for DeviceClass..."
