@@ -98,6 +98,7 @@ uninstall_resources() {
 
 destroy_cluster() {
     log_phase "Destroying Cluster"
+    log_info "Cluster destruction typically takes 10-20 minutes (stopping instances, removing load balancers, disks, and networking)"
 
     if [[ -z "$INSTALL_DIR" ]]; then
         log_error "Provide --install-dir or --cluster-name to destroy cluster"
