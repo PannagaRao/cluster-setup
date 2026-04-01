@@ -9,6 +9,8 @@ Claude Code workspace for setting up OpenShift clusters with NVIDIA GPUs and DRA
 - `/status` — Health check all components
 - `/test` — Run GPU/DRA smoke tests
 
+**Always use these slash commands** for cluster operations instead of calling `bin/setup.sh`, `bin/teardown.sh`, etc. directly. The skills handle progress reporting, error recovery, and user interaction properly.
+
 ## GPU Instance Matrix
 
 | GPU  | GCP Instance      | AWS Instance    | GPUs | MIG |
