@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Teardown: uninstall GPU/DRA resources or destroy entire cluster
-set -euo pipefail
+set -uo pipefail
+# NOTE: no 'set -e' — teardown must continue even if individual deletions fail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/config.sh"
@@ -40,27 +41,49 @@ if [[ -n "$INSTALL_DIR" && -f "${INSTALL_DIR}/auth/kubeconfig" ]]; then
     export KUBECONFIG="${INSTALL_DIR}/auth/kubeconfig"
 fi
 
+# Delete a namespace without blocking — patch finalizers if stuck
+delete_namespace() {
+    local ns="$1"
+    local timeout="${2:-60}"
+
+    oc delete namespace "$ns" --wait=false 2>/dev/null || true
+
+    # Wait briefly for normal deletion
+    local elapsed=0
+    while (( elapsed < timeout )); do
+        if ! oc get namespace "$ns" &>/dev/null; then
+            return 0
+        fi
+        sleep 5
+        elapsed=$(( elapsed + 5 ))
+    done
+
+    # Still stuck — clear finalizers
+    log_warn "Namespace $ns stuck in Terminating, clearing finalizers..."
+    oc get ns "$ns" -o json 2>/dev/null \
+        | python3 -c 'import sys,json; d=json.load(sys.stdin); d["spec"]["finalizers"]=[]; print(json.dumps(d))' \
+        | oc replace --raw "/api/v1/namespaces/${ns}/finalize" -f - 2>/dev/null || true
+}
+
 uninstall_resources() {
     log_phase "Removing GPU/DRA Resources"
 
     # Uninstall DRA driver
     log_info "Uninstalling DRA driver..."
     helm uninstall nvidia-dra-driver-gpu -n nvidia-dra-driver-gpu 2>/dev/null || true
-    sleep 10
-    oc delete namespace nvidia-dra-driver-gpu 2>/dev/null || true
+    delete_namespace nvidia-dra-driver-gpu 30
 
     # Delete GPU operator ClusterPolicy
     log_info "Removing GPU operator..."
-    oc delete clusterpolicy --all 2>/dev/null || true
-    sleep 20
+    oc delete clusterpolicy --all --wait=false 2>/dev/null || true
+    sleep 5
     helm uninstall gpu-operator -n nvidia-gpu-operator 2>/dev/null || true
-    sleep 10
-    oc delete namespace nvidia-gpu-operator 2>/dev/null || true
+    delete_namespace nvidia-gpu-operator 30
 
     # Uninstall NFD
     log_info "Removing NFD..."
     helm uninstall node-feature-discovery -n node-feature-discovery 2>/dev/null || true
-    oc delete namespace node-feature-discovery 2>/dev/null || true
+    delete_namespace node-feature-discovery 30
 
     # Clean up NVIDIA CRDs
     log_info "Cleaning up CRDs..."
@@ -75,6 +98,8 @@ uninstall_resources() {
 
 destroy_cluster() {
     log_phase "Destroying Cluster"
+
+    resolve_openshift_install
 
     if [[ -z "$INSTALL_DIR" ]]; then
         log_error "Provide --install-dir or --cluster-name to destroy cluster"
