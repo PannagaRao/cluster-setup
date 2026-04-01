@@ -99,11 +99,21 @@ uninstall_resources() {
 destroy_cluster() {
     log_phase "Destroying Cluster"
 
-    resolve_openshift_install
-
     if [[ -z "$INSTALL_DIR" ]]; then
         log_error "Provide --install-dir or --cluster-name to destroy cluster"
         exit 1
+    fi
+
+    # Try to resolve openshift-install without downloading (cluster metadata has OCP version)
+    if [[ ! -x "$OPENSHIFT_INSTALL" ]]; then
+        if [[ -x "${TOOLS_DIR}/openshift-install" ]]; then
+            OPENSHIFT_INSTALL="${TOOLS_DIR}/openshift-install"
+        elif command -v openshift-install &>/dev/null; then
+            OPENSHIFT_INSTALL="$(command -v openshift-install)"
+        else
+            log_error "openshift-install not found. Provide OPENSHIFT_INSTALL env var or place binary in bin/tools/"
+            return 1
+        fi
     fi
 
     if [[ ! -f "${INSTALL_DIR}/metadata.json" ]]; then
