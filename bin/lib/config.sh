@@ -16,7 +16,7 @@ get_instance_type() {
         gcp-h100) echo "a3-highgpu-1g" ;;
         aws-t4)   echo "g4dn.xlarge" ;;
         aws-a100) echo "p4d.24xlarge" ;;
-        aws-h100) echo "p5.48xlarge" ;;
+        aws-h100) echo "p5.4xlarge" ;;   # 1 H100 with MIG support
         *) echo "ERROR: unsupported cloud-gpu combo: ${cloud}-${gpu}" >&2; return 1 ;;
     esac
 }
@@ -48,7 +48,7 @@ get_instance_vcpus() {
         gcp-h100) echo 26 ;;  # a3-highgpu-1g
         aws-t4)   echo 4 ;;
         aws-a100) echo 96 ;;
-        aws-h100) echo 192 ;;
+        aws-h100) echo 16 ;;   # p5.4xlarge
         *) echo 0 ;;
     esac
 }
@@ -63,7 +63,7 @@ get_gpu_count() {
         gcp-h100) echo 1 ;;  # a3-highgpu-1g = 1 H100
         aws-t4)   echo 1 ;;
         aws-a100) echo 8 ;;  # p4d.24xlarge = 8 A100
-        aws-h100) echo 8 ;;  # p5.48xlarge = 8 H100
+        aws-h100) echo 1 ;;  # p5.4xlarge = 1 H100
         *) echo 0 ;;
     esac
 }

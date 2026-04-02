@@ -90,9 +90,36 @@ print(0)
         cpu_needed=$(get_instance_vcpus gcp "$gpu")
 
         if (( cpu_limit < cpu_needed )); then
-            log_error "${cpu_metric} quota is ${cpu_limit} in ${region}, need at least ${cpu_needed}."
-            log_error "  Request increase at: https://console.cloud.google.com/iam-admin/quotas?project=${GCP_PROJECT}"
-            return 1
+            # Per-family quota is insufficient; check general CPUS quota as fallback
+            local general_cpu_limit
+            general_cpu_limit=$(echo "$quota_json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for q in data.get('quotas', []):
+    if q['metric'] == 'CPUS':
+        print(int(q['limit']))
+        sys.exit(0)
+print(0)
+" 2>/dev/null)
+            local general_cpu_usage
+            general_cpu_usage=$(echo "$quota_json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for q in data.get('quotas', []):
+    if q['metric'] == 'CPUS':
+        print(int(q['usage']))
+        sys.exit(0)
+print(0)
+" 2>/dev/null)
+            local general_cpu_available=$(( general_cpu_limit - general_cpu_usage ))
+
+            if (( general_cpu_available >= cpu_needed )); then
+                log_warn "${cpu_metric} quota is ${cpu_limit}, but general CPUS quota covers it (available=${general_cpu_available})"
+            else
+                log_error "CPU quota insufficient in ${region}: ${cpu_metric}=${cpu_limit}, CPUS available=${general_cpu_available}, need ${cpu_needed}."
+                log_error "  Request increase at: https://console.cloud.google.com/iam-admin/quotas?project=${GCP_PROJECT}"
+                return 1
+            fi
         else
             log_success "${cpu_metric}: limit=${cpu_limit} (need ${cpu_needed})"
         fi

@@ -18,7 +18,7 @@ Claude Code workspace for setting up OpenShift clusters with NVIDIA GPUs and DRA
 | T4   | n1-standard-4 + nvidia-tesla-t4 accelerator | g4dn.xlarge | 1 | No |
 | L4   | g2-standard-4     | (GCP only)      | 1    | No  |
 | A100 | a2-highgpu-1g     | p4d.24xlarge    | 1/8  | Yes |
-| H100 | a3-highgpu-1g     | p5.48xlarge     | 1/8  | Yes |
+| H100 | a3-highgpu-1g     | p5.4xlarge      | 1    | Yes |
 
 ### Quota Status (as of March 2026)
 

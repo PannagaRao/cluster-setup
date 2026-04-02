@@ -46,6 +46,12 @@ generate_gcp_install_config() {
     cp_zones=$(gcloud compute zones list --filter="region=${region}" --format="value(name)" 2>/dev/null | head -3 | paste -sd' ')
     read -ra cp_zone_array <<< "$cp_zones"
 
+    # GPU instances require onHostMaintenance: Terminate
+    local on_host_maintenance=""
+    case "$gpu" in
+        t4|a100|h100) on_host_maintenance="Terminate" ;;
+    esac
+
     cat > "${output_dir}/install-config.yaml" <<EOF
 apiVersion: v1
 metadata:
@@ -58,6 +64,7 @@ compute:
   platform:
     gcp:
       type: ${instance_type}
+${on_host_maintenance:+      onHostMaintenance: ${on_host_maintenance}}
       zones:
       - ${worker_zone}
       osDisk:
