@@ -235,7 +235,7 @@ if should_run_phase "gpu-operator"; then
 fi
 
 if should_run_phase "dra-driver"; then
-    install_dra_driver "$GPU" "$MIG_MODE"
+    install_dra_driver "$GPU" "$MIG_MODE" "$CLOUD"
 fi
 
 if should_run_phase "smoke-test"; then

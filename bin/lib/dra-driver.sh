@@ -51,6 +51,19 @@ install_dra_driver() {
         set_overrides="--set featureGates.DynamicMIG=true"
     fi
 
+    # A100 GPUs on cloud VMs do not support GPU reset (nvidia-smi --gpu-reset
+    # returns "Not Supported"). The DRA driver's DestroyUnknownMIGDevices
+    # startup code calls SetMigMode(DISABLE) on every restart, which puts
+    # the GPU into a pending-disable state that requires a reboot to resolve.
+    # This creates an unrecoverable loop. Use the patched image that skips
+    # DestroyUnknownMIGDevices on A100 cloud VMs.
+    # H100 supports GPU reset, so the standard image works fine.
+    local cloud="${3:-}"
+    if [[ "$mig_mode" == "dynamicmig" && "$gpu" == "a100" && -n "$cloud" && ("$cloud" == "gcp" || "$cloud" == "aws") ]]; then
+        log_info "A100 on cloud VM detected: using patched DRA driver image (skips DestroyUnknownMIGDevices)"
+        set_overrides="${set_overrides} --set image.repository=quay.io/rh-pbhojara/nvidia-driver --set image.tag=v25.12.0-dev-patched --set image.pullPolicy=Always"
+    fi
+
     # Install DRA driver
     # shellcheck disable=SC2086
     helm install nvidia-dra-driver-gpu nvidia/nvidia-dra-driver-gpu \
@@ -81,4 +94,143 @@ install_dra_driver() {
 
     log_info "ResourceSlices:"
     oc get resourceslice 2>/dev/null || true
+
+    # A100 on cloud VMs: enable MIG mode, reboot worker, deploy keepalive
+    local cloud="${3:-}"
+    if [[ "$mig_mode" == "dynamicmig" && "$gpu" == "a100" && -n "$cloud" && ("$cloud" == "gcp" || "$cloud" == "aws") ]]; then
+        activate_mig_cloud_vm
+    fi
+}
+
+# Activate MIG mode on A100 cloud VMs where GPU reset is not supported.
+# Steps: enable MIG (pending), reboot worker to apply, deploy keepalive pod.
+activate_mig_cloud_vm() {
+    log_phase "Activating MIG Mode (A100 Cloud VM)"
+
+    # Find the GPU operator driver daemonset pod
+    local driver_pod
+    driver_pod=$(oc get pods -n nvidia-gpu-operator --no-headers 2>/dev/null \
+        | grep "nvidia-driver-daemonset" | awk '{print $1}' | head -1)
+
+    if [[ -z "$driver_pod" ]]; then
+        log_error "No nvidia-driver-daemonset pod found in nvidia-gpu-operator namespace"
+        return 1
+    fi
+
+    # Check current MIG mode
+    local mig_status
+    mig_status=$(oc exec -n nvidia-gpu-operator "$driver_pod" -- \
+        nvidia-smi --query-gpu=mig.mode.current,mig.mode.pending --format=csv,noheader 2>/dev/null)
+    log_info "Current MIG status: ${mig_status}"
+
+    local mig_current mig_pending
+    mig_current=$(echo "$mig_status" | awk -F', ' '{print $1}')
+    mig_pending=$(echo "$mig_status" | awk -F', ' '{print $2}')
+
+    if [[ "$mig_current" == "Enabled" && "$mig_pending" == "Enabled" ]]; then
+        log_success "MIG mode already Enabled/Enabled — skipping reboot"
+    else
+        # Enable MIG mode (sets pending)
+        log_info "Enabling MIG mode on GPU 0..."
+        oc exec -n nvidia-gpu-operator "$driver_pod" -- nvidia-smi -i 0 -mig 1 2>&1 || true
+
+        # Reboot worker to apply pending MIG mode change
+        local worker
+        worker=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].metadata.name}')
+        log_info "Rebooting worker ${worker} to activate MIG mode..."
+
+        oc adm cordon "$worker"
+        oc adm drain "$worker" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s 2>/dev/null || true
+        oc debug "node/${worker}" -- chroot /host shutdown -r now 2>/dev/null || true
+
+        # Wait for node to come back
+        log_info "Waiting for worker to reboot..."
+        sleep 30
+        local elapsed=30
+        while (( elapsed < 600 )); do
+            local ready
+            ready=$(oc get node "$worker" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+            if [[ "$ready" == "True" ]]; then
+                break
+            fi
+            sleep 15
+            elapsed=$(( elapsed + 15 ))
+        done
+
+        oc adm uncordon "$worker"
+
+        # Wait for driver pod to be ready again
+        log_info "Waiting for GPU driver pod to restart..."
+        sleep 30
+        local new_driver_pod=""
+        elapsed=0
+        while (( elapsed < 300 )); do
+            new_driver_pod=$(oc get pods -n nvidia-gpu-operator --no-headers 2>/dev/null \
+                | grep "nvidia-driver-daemonset" | grep "2/2" | awk '{print $1}' | head -1)
+            if [[ -n "$new_driver_pod" ]]; then break; fi
+            sleep 15
+            elapsed=$(( elapsed + 15 ))
+        done
+
+        if [[ -z "$new_driver_pod" ]]; then
+            log_error "Driver pod did not become ready after reboot"
+            return 1
+        fi
+
+        # Verify MIG is Enabled/Enabled
+        mig_status=$(oc exec -n nvidia-gpu-operator "$new_driver_pod" -- \
+            nvidia-smi --query-gpu=mig.mode.current,mig.mode.pending --format=csv,noheader 2>/dev/null)
+        log_info "MIG status after reboot: ${mig_status}"
+
+        if [[ "$mig_status" != *"Enabled"*"Enabled"* ]]; then
+            log_error "MIG mode is not Enabled/Enabled after reboot: ${mig_status}"
+            return 1
+        fi
+        log_success "MIG mode activated (Enabled/Enabled)"
+    fi
+
+    # Deploy keepalive pod to prevent maybeDisableMigMode from triggering
+    # when all user MIG devices are deleted
+    log_info "Deploying MIG keepalive pod (1g.5gb)..."
+    oc create namespace pd-test 2>/dev/null || true
+
+    oc apply -f - <<'KEEPALIVE_EOF'
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  name: keepalive-gpu0
+  namespace: pd-test
+spec:
+  devices:
+    requests:
+    - name: keepalive
+      exactly:
+        deviceClassName: mig.nvidia.com
+        selectors:
+        - cel:
+            expression: "device.attributes['gpu.nvidia.com'].profile == '1g.5gb'"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: keepalive-gpu0
+  namespace: pd-test
+spec:
+  containers:
+  - name: keepalive
+    image: ubuntu:22.04
+    command: ["bash", "-c"]
+    args: ["trap 'exit 0' TERM; sleep infinity & wait"]
+    resources:
+      claims:
+      - name: mig-claim
+  resourceClaims:
+  - name: mig-claim
+    resourceClaimName: keepalive-gpu0
+  restartPolicy: Always
+KEEPALIVE_EOF
+
+    # Wait for keepalive pod
+    wait_for_pods_running "pd-test" "" 120 || true
+    log_success "MIG keepalive pod deployed"
 }

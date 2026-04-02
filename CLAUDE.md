@@ -24,7 +24,7 @@ Claude Code workspace for setting up OpenShift clusters with NVIDIA GPUs and DRA
 
 **GCP (set via `GCP_PROJECT` env var):**
 - T4: 16 GPUs quota in us-central1 — works
-- A100: 10 GPUs quota but A2_CPUS=0 — needs CPU quota increase
+- A100: 10 GPUs quota, A2_CPUS=0 but general CPUS=1000 covers it — works
 - H100: No quota at all — needs quota request
 
 **AWS (set via `AWS_PROFILE` or `~/.aws/credentials`):**
@@ -93,6 +93,23 @@ These are hard-won lessons — do not remove without understanding why they exis
 
 8. **SharedCounterSets timing** — with DynamicMIG, ResourceSlice may take up to 60s to update after MIG partition creation. Tests should wait for ResourceSlice to show the partition.
 
+9. **A100 DynamicMIG on cloud VMs (GPU reset not supported)** — NVIDIA Ampere GPUs (A100) in cloud VM passthrough (GCP a2-highgpu, AWS p4d) do not support `nvidia-smi --gpu-reset`. MIG mode toggling requires a GPU reset to take effect, so every MIG mode change requires a **full node reboot**. The DRA driver's `DestroyUnknownMIGDevices` startup code calls `SetMigMode(DISABLE)` on every restart, creating an unrecoverable loop where MIG gets disabled on every plugin restart. H100 does not have this issue — it supports GPU reset.
+
+   **Workaround (automated in setup for A100 on GCP/AWS):**
+   1. Use the **patched DRA driver image** (`quay.io/rh-pbhojara/nvidia-driver:v25.12.0-dev-patched`) that skips `DestroyUnknownMIGDevices` on startup
+   2. **Manually enable MIG** via `nvidia-smi -i 0 -mig 1` through the GPU operator driver pod
+   3. **Reboot the worker node** to activate the pending MIG mode change (cordon, drain, reboot, uncordon)
+   4. **Deploy a keepalive pod** (1g.5gb MIG device) to prevent `maybeDisableMigMode` from triggering when all user MIG devices are deleted
+
+   **Checking MIG status:** `oc exec -n nvidia-gpu-operator <driver-pod> -- nvidia-smi --query-gpu=mig.mode.current,mig.mode.pending --format=csv`
+   - `Enabled, Enabled` = stable, ready for MIG workloads
+   - `Disabled, Enabled` = pending reboot to activate
+   - `Enabled, Disabled` = driver requested disable, needs reboot then re-enable
+
+10. **GCP GPU instances require onHostMaintenance: Terminate** — all GPU instance types on GCP (T4, A100, H100) require `onHostMaintenance: Terminate` in the install-config. The installer defaults to `MIGRATE`, which GCP rejects for GPU instances. This is set in the install-config generation (`install-config.sh`), not as a post-install patch.
+
+11. **GCP A2_CPUS quota fallback** — some GCP projects have `A2_CPUS=0` but a general `CPUS` quota that covers A2 instances. The quota check falls back to the general `CPUS` quota when the per-family quota is insufficient.
+
 ## Error Recovery
 
 | Error | Cause | Fix |
@@ -105,6 +122,9 @@ These are hard-won lessons — do not remove without understanding why they exis
 | GPU driver pod stuck in Init | Kernel module build failure | Delete pod, check driver toolkit image |
 | No ResourceSlice | DRA driver permissions | Verify SCC grants for kubelet-plugin SA |
 | nvidia-smi not found in pod | Wrong container image | Use CUDA-enabled image for GPU workloads |
+| MIG mode "Not Supported" on A100 | Cloud VM GPU reset not supported | Use patched DRA driver image + manual MIG enable + node reboot |
+| MIG Enabled/Disabled after reboot | Unpatched driver called SetMigMode(DISABLE) on startup | Switch to patched image, re-enable MIG, reboot again |
+| onHostMaintenance MIGRATE rejected | GCP GPU instance needs Terminate | Set `onHostMaintenance: Terminate` in install-config or patch MachineSet |
 
 ## Key Namespaces
 

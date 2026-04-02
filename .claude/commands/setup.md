@@ -14,9 +14,30 @@ Ask the user for:
 7. **MIG mode**: only ask if GPU is `a100` or `h100` — offer `timeslicing` (default) or `dynamicmig`
 
 Auto-resolve region and zone from the GPU matrix. Validate the cloud+GPU combo:
-- A100 on GCP: warn about A2_CPUS quota (may be 0)
+- A100 on GCP: warn about A2_CPUS quota (may be 0, but general CPUS quota may cover it)
 - H100 on GCP: warn about missing H100 quota
 - T4: works on both clouds
+
+### A100 + DynamicMIG Warning
+
+If the user selects **A100** with **dynamicmig** on a cloud platform (GCP or AWS), present this warning before proceeding:
+
+> **A100 DynamicMIG Limitation on Cloud VMs:**
+>
+> A100 GPUs on cloud VMs (GCP/AWS) do not support GPU reset (`nvidia-smi --gpu-reset` returns "Not Supported"). DynamicMIG requires GPU reset to toggle MIG mode. This means:
+> - Every MIG mode change requires a **full node reboot** (~5 min downtime)
+> - A **patched DRA driver image** is needed to prevent the driver from disabling MIG on restart
+> - A **keepalive pod** must run permanently to prevent MIG from being disabled when all workloads are removed
+>
+> The setup script handles all of this automatically, but be aware of the reboot during setup.
+>
+> **Alternatives:**
+> 1. **H100** — supports GPU reset natively, DynamicMIG works without workarounds
+> 2. **A100 with timeslicing** — no MIG partitioning, but avoids the GPU reset issue entirely
+>
+> Do you want to proceed with A100 + DynamicMIG (with workarounds), switch to H100, or use timeslicing instead?
+
+Wait for the user's choice before continuing.
 
 Present a summary that includes **all component versions** that will be installed:
 - OCP version
