@@ -143,31 +143,60 @@ activate_mig_cloud_vm() {
         oc adm drain "$worker" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s 2>/dev/null || true
         oc debug "node/${worker}" -- chroot /host shutdown -r now 2>/dev/null || true
 
-        # Wait for node to come back
-        log_info "Waiting for worker to reboot..."
-        sleep 30
-        local elapsed=30
+        # Wait for node to go NotReady (confirms reboot started)
+        log_info "Waiting for worker to begin reboot..."
+        local elapsed=0
+        while (( elapsed < 120 )); do
+            local ready
+            ready=$(oc get node "$worker" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+            if [[ "$ready" != "True" ]]; then
+                log_info "Worker is rebooting (status: ${ready})"
+                break
+            fi
+            sleep 10
+            elapsed=$(( elapsed + 10 ))
+        done
+
+        # Wait for node to come back Ready
+        log_info "Waiting for worker to come back Ready..."
+        elapsed=0
         while (( elapsed < 600 )); do
             local ready
             ready=$(oc get node "$worker" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
             if [[ "$ready" == "True" ]]; then
+                log_success "Worker is Ready"
                 break
             fi
             sleep 15
             elapsed=$(( elapsed + 15 ))
         done
 
+        # Verify node is actually Ready before uncordoning
+        local final_ready
+        final_ready=$(oc get node "$worker" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+        if [[ "$final_ready" != "True" ]]; then
+            log_error "Worker did not become Ready after 600s (status: ${final_ready})"
+            return 1
+        fi
+
         oc adm uncordon "$worker"
 
-        # Wait for driver pod to be ready again
+        # Wait for driver pod to be ready after reboot.
+        # Old pods may still show Running briefly — wait for a pod with
+        # a recent start time by checking container restart count or age.
         log_info "Waiting for GPU driver pod to restart..."
-        sleep 30
         local new_driver_pod=""
         elapsed=0
-        while (( elapsed < 300 )); do
+        while (( elapsed < 600 )); do
             new_driver_pod=$(oc get pods -n nvidia-gpu-operator --no-headers 2>/dev/null \
-                | grep "nvidia-driver-daemonset" | grep "2/2" | awk '{print $1}' | head -1)
-            if [[ -n "$new_driver_pod" ]]; then break; fi
+                | grep "nvidia-driver-daemonset" | grep -E "2/2\s+Running" | awk '{print $1}' | head -1)
+            if [[ -n "$new_driver_pod" ]]; then
+                # Verify we can actually exec into it (confirms it's not a stale pod)
+                if oc exec -n nvidia-gpu-operator "$new_driver_pod" -- nvidia-smi --query-gpu=name --format=csv,noheader &>/dev/null; then
+                    break
+                fi
+                new_driver_pod=""
+            fi
             sleep 15
             elapsed=$(( elapsed + 15 ))
         done
