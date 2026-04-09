@@ -130,7 +130,22 @@ if [[ -z "$REGION" ]]; then
     REGION=$(get_default_region "$CLOUD" "$GPU")
 fi
 if [[ -z "$WORKER_ZONE" ]]; then
-    WORKER_ZONE=$(get_default_worker_zone "$CLOUD" "$GPU")
+    # If region was explicitly set, pick the first zone in that region from priority list
+    # Otherwise use the default zone
+    if [[ -n "$REGION" ]]; then
+        for z in $(get_zone_priority "$CLOUD" "$GPU"); do
+            if [[ "$(get_region_from_zone "$CLOUD" "$z")" == "$REGION" ]]; then
+                WORKER_ZONE="$z"
+                break
+            fi
+        done
+        # If no zone found in priority list for this region, default to first AZ
+        if [[ -z "$WORKER_ZONE" ]]; then
+            WORKER_ZONE="${REGION}a"
+        fi
+    else
+        WORKER_ZONE=$(get_default_worker_zone "$CLOUD" "$GPU")
+    fi
 fi
 if [[ -z "$SSH_KEY" ]]; then
     if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then

@@ -187,7 +187,7 @@ activate_mig_cloud_vm() {
         log_info "Waiting for GPU driver pod to restart..."
         local new_driver_pod=""
         elapsed=0
-        while (( elapsed < 600 )); do
+        while (( elapsed < 900 )); do
             new_driver_pod=$(oc get pods -n nvidia-gpu-operator --no-headers 2>/dev/null \
                 | grep "nvidia-driver-daemonset" | grep -E "2/2\s+Running" | awk '{print $1}' | head -1)
             if [[ -n "$new_driver_pod" ]]; then
@@ -202,7 +202,7 @@ activate_mig_cloud_vm() {
         done
 
         if [[ -z "$new_driver_pod" ]]; then
-            log_error "Driver pod did not become ready after reboot"
+            log_error "Driver pod did not become ready after reboot (waited 900s)"
             return 1
         fi
 
