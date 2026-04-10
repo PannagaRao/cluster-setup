@@ -49,7 +49,7 @@ generate_gcp_install_config() {
     # GPU instances require onHostMaintenance: Terminate
     local on_host_maintenance=""
     case "$gpu" in
-        t4|a100|h100) on_host_maintenance="Terminate" ;;
+        t4|l4|a100|h100) on_host_maintenance="Terminate" ;;
     esac
 
     cat > "${output_dir}/install-config.yaml" <<EOF

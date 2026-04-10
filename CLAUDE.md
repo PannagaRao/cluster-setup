@@ -106,7 +106,7 @@ These are hard-won lessons — do not remove without understanding why they exis
    - `Disabled, Enabled` = pending reboot to activate
    - `Enabled, Disabled` = driver requested disable, needs reboot then re-enable
 
-10. **GCP GPU instances require onHostMaintenance: Terminate** — all GPU instance types on GCP (T4, A100, H100) require `onHostMaintenance: Terminate` in the install-config. The installer defaults to `MIGRATE`, which GCP rejects for GPU instances. This is set in the install-config generation (`install-config.sh`), not as a post-install patch.
+10. **GCP GPU instances require onHostMaintenance: Terminate** — all GPU instance types on GCP (T4, L4, A100, H100) require `onHostMaintenance: Terminate` in the install-config. The installer defaults to `MIGRATE`, which GCP rejects for GPU instances. This is set in the install-config generation (`install-config.sh`), not as a post-install patch.
 
 11. **GCP A2_CPUS quota fallback** — some GCP projects have `A2_CPUS=0` but a general `CPUS` quota that covers A2 instances. The quota check falls back to the general `CPUS` quota when the per-family quota is insufficient.
 
