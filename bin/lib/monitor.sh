@@ -194,12 +194,22 @@ for m in data.get('items', []):
                         fi
                     done
 
-                    # Patch MachineSet with new zone (AWS only for now)
+                    # Patch MachineSet with new zone
                     if [[ "$cloud" == "aws" ]]; then
                         local new_region
                         new_region=$(get_region_from_zone "$cloud" "$new_zone")
                         oc patch machineset.machine.openshift.io "$machineset" -n openshift-machine-api --type=merge \
                             -p "{\"spec\":{\"template\":{\"spec\":{\"providerSpec\":{\"value\":{\"placement\":{\"availabilityZone\":\"${new_zone}\",\"region\":\"${new_region}\"}}}}}}}}" 2>/dev/null || true
+                        # Patch subnet filter to match new zone (required per CLAUDE.md workaround #6)
+                        local cluster_infra_id
+                        cluster_infra_id=$(oc get infrastructure cluster -o jsonpath='{.status.infrastructureName}' 2>/dev/null)
+                        if [[ -n "$cluster_infra_id" ]]; then
+                            oc patch machineset.machine.openshift.io "$machineset" -n openshift-machine-api --type=json \
+                                -p "[{\"op\":\"replace\",\"path\":\"/spec/template/spec/providerSpec/value/subnet/filters/0/values/0\",\"value\":\"${cluster_infra_id}-subnet-private-${new_zone}\"}]" 2>/dev/null || true
+                        fi
+                    elif [[ "$cloud" == "gcp" ]]; then
+                        oc patch machineset.machine.openshift.io "$machineset" -n openshift-machine-api --type=merge \
+                            -p "{\"spec\":{\"template\":{\"spec\":{\"providerSpec\":{\"value\":{\"zone\":\"${new_zone}\"}}}}}}" 2>/dev/null || true
                     fi
                 fi
             fi

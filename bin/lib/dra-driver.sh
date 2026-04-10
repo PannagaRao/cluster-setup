@@ -157,6 +157,12 @@ activate_mig_cloud_vm() {
             elapsed=$(( elapsed + 10 ))
         done
 
+        # If we never saw NotReady, the reboot may not have started
+        if (( elapsed >= 120 )); then
+            log_error "Node did not enter NotReady state within 120s — reboot may have failed"
+            return 1
+        fi
+
         # Wait for node to come back Ready
         log_info "Waiting for worker to come back Ready..."
         elapsed=0

@@ -166,7 +166,7 @@ patch_machineset_gpu_accelerator() {
 
     # Get the worker MachineSet name
     local machineset
-    machineset=$(oc get machines.machine.openshift.ioets.machine.openshift.io -n openshift-machine-api \
+    machineset=$(oc get machinesets.machine.openshift.io -n openshift-machine-api \
         -l machine.openshift.io/cluster-api-machine-role=worker \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
