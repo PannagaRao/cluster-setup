@@ -11,7 +11,7 @@ get_instance_type() {
     local cloud="$1" gpu="$2"
     case "${cloud}-${gpu}" in
         gcp-t4)   echo "n1-standard-8" ;;  # T4 attached as accelerator post-install; 8 vCPUs for faster driver compilation
-        gcp-l4)   echo "g2-standard-4" ;;  # L4 is built into g2 instance
+        gcp-l4)   echo "g2-standard-8" ;;  # L4 is built into g2 instance; 8 vCPUs for faster driver compilation
         gcp-a100) echo "a2-highgpu-1g" ;;
         gcp-h100) echo "a3-highgpu-1g" ;;
         aws-t4)   echo "g4dn.xlarge" ;;
