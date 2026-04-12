@@ -67,7 +67,16 @@ setup_gcp_service_account() {
             --iam-account="$sa_email" --project="$GCP_PROJECT"
         log_success "Service account key exported to: ${key_path}"
     else
-        log_success "Service account key already exists: ${key_path}"
+        # Validate existing key is still valid
+        if ! gcloud auth activate-service-account --key-file="$key_path" --project="$GCP_PROJECT" &>/dev/null; then
+            log_warn "Existing service account key is stale — regenerating"
+            rm -f "$key_path"
+            gcloud iam service-accounts keys create "$key_path" \
+                --iam-account="$sa_email" --project="$GCP_PROJECT"
+            log_success "Service account key regenerated: ${key_path}"
+        else
+            log_success "Service account key already exists: ${key_path}"
+        fi
     fi
 
     export GOOGLE_APPLICATION_CREDENTIALS="$key_path"
