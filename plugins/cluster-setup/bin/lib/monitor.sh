@@ -154,6 +154,23 @@ monitor_worker_provisioning() {
     # Double the zone list so we try all zones twice before giving up
     local double_zones=("${zone_array[@]}" "${zone_array[@]}")
 
+    # AWS CAPI: infrastructure creation happens after kubeconfig appears.
+    # Wait for at least one worker Machine to exist before polling status.
+    if [[ "$cloud" == "aws" ]]; then
+        log_info "Waiting for worker Machine objects to appear (AWS CAPI infrastructure setup)..."
+        local machine_wait=0
+        while (( machine_wait < 900 )); do
+            local machine_count
+            machine_count=$(oc get machines.machine.openshift.io -n openshift-machine-api --no-headers 2>/dev/null | grep -c worker || true)
+            if (( machine_count > 0 )); then
+                log_info "Worker Machine found, starting provisioning monitor"
+                break
+            fi
+            sleep 15
+            machine_wait=$(( machine_wait + 15 ))
+        done
+    fi
+
     log_info "Monitoring worker provisioning (zones: ${zones}, 2 passes)"
     local elapsed=0 poll_interval=15
     while (( elapsed < timeout )); do
