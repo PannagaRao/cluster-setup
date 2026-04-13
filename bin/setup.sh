@@ -19,19 +19,25 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Create an OpenShift cluster with NVIDIA GPUs and DRA support.
+Create an OpenShift cluster, optionally with NVIDIA GPUs and DRA support.
 
 Required:
   --cluster-name NAME     Cluster name
   --cloud CLOUD            Cloud provider: gcp, aws
-  --gpu GPU                GPU type: t4, l4, a100, h100
   --pull-secret PATH       Path to pull-secret.json
+
+Instance type (at least one of --gpu or --instance-type required):
+  --gpu GPU                GPU type: t4, l4 (GCP only), a100, h100
+                           Auto-resolves instance type from GPU matrix
+  --instance-type TYPE     Worker instance type (e.g. m6i.xlarge, g4dn.xlarge)
+                           GPU auto-detected from instance family when --gpu omitted
+  --no-gpu                 Skip GPU stack even on GPU-capable instances
 
 Optional:
   --ocp-version VERSION    OpenShift version (default: 4.21.0)
   --openshift-install PATH Path to openshift-install binary (auto-downloaded if not found)
   --mig-mode MODE          MIG mode: timeslicing, dynamicmig (default: timeslicing)
-                           Ignored for non-MIG GPUs (T4)
+                           Ignored for non-MIG GPUs (T4, L4)
   --region REGION          Cloud region (auto-selected if not specified)
   --worker-zone ZONE       Worker node zone (auto-selected if not specified)
   --ssh-key PATH           SSH public key path (default: ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub)
@@ -45,14 +51,20 @@ Optional:
   -h, --help               Show this help
 
 Examples:
-  # T4 on AWS (cheapest)
+  # General-purpose cluster (no GPU)
+  $(basename "$0") --cluster-name my-cluster --cloud aws --pull-secret ~/.pull-secret.json --instance-type m6i.xlarge
+
+  # T4 on AWS (GPU auto-detected from instance type)
+  $(basename "$0") --cluster-name my-test --cloud aws --pull-secret ~/.pull-secret.json --instance-type g4dn.xlarge
+
+  # T4 on AWS (explicit GPU flag, instance type auto-resolved)
   $(basename "$0") --cluster-name my-test --cloud aws --gpu t4 --pull-secret ~/.pull-secret.json
 
   # A100 on GCP with DynamicMIG
   $(basename "$0") --cluster-name mig-test --cloud gcp --gpu a100 --pull-secret ~/.pull-secret.json --mig-mode dynamicmig
 
-  # H100 on AWS, skip to DRA driver install (cluster already exists)
-  $(basename "$0") --cluster-name gpu-test --cloud aws --gpu h100 --pull-secret ~/.pull-secret.json --skip-to dra-driver
+  # GPU instance without GPU stack (e.g. manual GPU setup later)
+  $(basename "$0") --cluster-name bare-gpu --cloud aws --pull-secret ~/.pull-secret.json --instance-type g4dn.xlarge --no-gpu
 EOF
 }
 
@@ -60,6 +72,8 @@ EOF
 CLUSTER_NAME=""
 CLOUD=""
 GPU=""
+INSTANCE_TYPE=""
+NO_GPU=false
 PULL_SECRET=""
 MIG_MODE="timeslicing"
 REGION=""
@@ -69,12 +83,15 @@ INSTALL_DIR=""
 SKIP_CLUSTER=false
 SKIP_TO=""
 SMOKE_TEST=false
+GENERATE_CONFIG_ONLY=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --cluster-name) CLUSTER_NAME="$2"; shift 2 ;;
         --cloud) CLOUD="$2"; shift 2 ;;
         --gpu) GPU="$2"; shift 2 ;;
+        --instance-type) INSTANCE_TYPE="$2"; shift 2 ;;
+        --no-gpu) NO_GPU=true; shift ;;
         --pull-secret) PULL_SECRET="$2"; shift 2 ;;
         --ocp-version) OCP_VERSION="$2"; shift 2 ;;
         --openshift-install) OPENSHIFT_INSTALL="$2"; shift 2 ;;
@@ -89,16 +106,23 @@ while [[ $# -gt 0 ]]; do
         --skip-cluster) SKIP_CLUSTER=true; shift ;;
         --skip-to) SKIP_TO="$2"; shift 2 ;;
         --smoke-test) SMOKE_TEST=true; shift ;;
+        --generate-config-only) GENERATE_CONFIG_ONLY=true; shift ;;
         -h|--help) usage; exit 0 ;;
         *) log_error "Unknown option: $1"; usage; exit 1 ;;
     esac
 done
 
 # Validate required args
-if [[ -z "$CLUSTER_NAME" || -z "$CLOUD" || -z "$GPU" || -z "$PULL_SECRET" ]]; then
-    log_error "Missing required arguments"
+if [[ -z "$CLUSTER_NAME" || -z "$CLOUD" || -z "$PULL_SECRET" ]]; then
+    log_error "Missing required arguments: --cluster-name, --cloud, and --pull-secret are required"
     usage
     exit 1
+fi
+
+# Normalize inputs
+CLOUD=$(echo "$CLOUD" | tr '[:upper:]' '[:lower:]')
+if [[ -n "$GPU" ]]; then
+    GPU=$(echo "$GPU" | tr '[:upper:]' '[:lower:]')
 fi
 
 # Validate cloud
@@ -107,16 +131,9 @@ if [[ "$CLOUD" != "gcp" && "$CLOUD" != "aws" ]]; then
     exit 1
 fi
 
-# Validate GPU
-if [[ "$GPU" != "t4" && "$GPU" != "l4" && "$GPU" != "a100" && "$GPU" != "h100" ]]; then
-    log_error "Invalid GPU: $GPU (must be t4, l4, a100, or h100)"
-    exit 1
-fi
-
-# Validate cloud+GPU combo
-if [[ "$GPU" == "l4" && "$CLOUD" != "gcp" ]]; then
-    log_error "L4 is only available on GCP (g2-standard-4)"
-    exit 1
+# Resolve relative pull secret path to absolute
+if [[ -n "$PULL_SECRET" && "$PULL_SECRET" != /* ]]; then
+    PULL_SECRET="${PWD}/${PULL_SECRET}"
 fi
 
 # Validate pull secret exists
@@ -125,13 +142,112 @@ if [[ ! -f "$PULL_SECRET" ]]; then
     exit 1
 fi
 
+# GCP requires GCP_PROJECT
+if [[ "$CLOUD" == "gcp" && -z "$GCP_PROJECT" ]]; then
+    log_error "GCP_PROJECT environment variable is required for GCP clusters"
+    log_error "Set it with: export GCP_PROJECT=<your-project-id>"
+    exit 1
+fi
+
+# Need at least --gpu or --instance-type
+if [[ -z "$GPU" && -z "$INSTANCE_TYPE" ]]; then
+    log_error "Either --gpu or --instance-type must be specified"
+    usage
+    exit 1
+fi
+
+# --no-gpu + --gpu conflict
+if [[ "$NO_GPU" == "true" && -n "$GPU" ]]; then
+    log_error "Cannot use both --gpu and --no-gpu"
+    exit 1
+fi
+
+# Resolve GPU and instance type
+if [[ "$NO_GPU" == "true" ]]; then
+    # Explicit no-GPU: use provided instance type or default
+    GPU="none"
+    if [[ -z "$INSTANCE_TYPE" ]]; then
+        INSTANCE_TYPE=$(get_instance_type "$CLOUD" none)
+    fi
+elif [[ -n "$GPU" && -n "$INSTANCE_TYPE" ]]; then
+    # Both provided: validate consistency
+    if [[ "$GPU" != "t4" && "$GPU" != "l4" && "$GPU" != "a100" && "$GPU" != "h100" ]]; then
+        log_error "Invalid GPU: $GPU (must be t4, l4, a100, or h100)"
+        exit 1
+    fi
+    detected=$(detect_gpu_from_instance_type "$CLOUD" "$INSTANCE_TYPE")
+    if [[ "$detected" == "maybe-t4" ]]; then
+        # GCP n1-* with --gpu t4 is valid (T4 accelerator attachment)
+        if [[ "$GPU" != "t4" ]]; then
+            log_error "Instance type ${INSTANCE_TYPE} (n1-*) only supports T4 accelerator, not ${GPU}"
+            exit 1
+        fi
+    elif [[ "$detected" != "none" && "$detected" != "$GPU" ]]; then
+        log_error "GPU mismatch: --gpu ${GPU} but instance type ${INSTANCE_TYPE} has ${detected}"
+        exit 1
+    elif [[ "$detected" == "none" ]]; then
+        log_error "Instance type ${INSTANCE_TYPE} does not support GPU. Remove --gpu or pick a GPU instance"
+        exit 1
+    fi
+elif [[ -n "$GPU" ]]; then
+    # Only --gpu: resolve instance type from matrix
+    if [[ "$GPU" != "t4" && "$GPU" != "l4" && "$GPU" != "a100" && "$GPU" != "h100" ]]; then
+        log_error "Invalid GPU: $GPU (must be t4, l4, a100, or h100)"
+        exit 1
+    fi
+    if [[ "$GPU" == "l4" && "$CLOUD" != "gcp" ]]; then
+        log_error "L4 is only available on GCP (g2-standard-8)"
+        exit 1
+    fi
+    INSTANCE_TYPE=$(get_instance_type "$CLOUD" "$GPU")
+else
+    # Only --instance-type: auto-detect GPU from instance family
+    detected=$(detect_gpu_from_instance_type "$CLOUD" "$INSTANCE_TYPE")
+    case "$detected" in
+        maybe-t4)
+            log_warn "Instance type ${INSTANCE_TYPE} (n1-*) can have a T4 accelerator. Use --gpu t4 to enable. Defaulting to no GPU."
+            GPU="none"
+            ;;
+        none)
+            GPU="none"
+            ;;
+        *)
+            GPU="$detected"
+            log_info "Auto-detected GPU: ${GPU} from instance type ${INSTANCE_TYPE}"
+            ;;
+    esac
+fi
+
+# Validate cloud+GPU combo
+if [[ "$GPU" == "l4" && "$CLOUD" != "gcp" ]]; then
+    log_error "L4 is only available on GCP (g2-standard-8)"
+    exit 1
+fi
+
+# GPU enabled helper
+has_gpu() { [[ "$GPU" != "none" ]]; }
+
+# Validate --skip-to with no GPU
+if [[ -n "$SKIP_TO" ]] && ! has_gpu; then
+    case "$SKIP_TO" in
+        feature-gates|cert-manager|nfd|gpu-operator|dra-driver|smoke-test)
+            log_error "Cannot --skip-to ${SKIP_TO}: no GPU selected"
+            exit 1
+            ;;
+    esac
+fi
+
+# Warn about --smoke-test with no GPU
+if [[ "$SMOKE_TEST" == "true" ]] && ! has_gpu; then
+    log_warn "--smoke-test ignored: no GPU selected (smoke test checks GPU resources)"
+    SMOKE_TEST=false
+fi
+
 # Auto-resolve defaults
 if [[ -z "$REGION" ]]; then
     REGION=$(get_default_region "$CLOUD" "$GPU")
 fi
 if [[ -z "$WORKER_ZONE" ]]; then
-    # If region was explicitly set, pick the first zone in that region from priority list
-    # Otherwise use the default zone
     if [[ -n "$REGION" ]]; then
         for z in $(get_zone_priority "$CLOUD" "$GPU"); do
             if [[ "$(get_region_from_zone "$CLOUD" "$z")" == "$REGION" ]]; then
@@ -139,7 +255,6 @@ if [[ -z "$WORKER_ZONE" ]]; then
                 break
             fi
         done
-        # If no zone found in priority list for this region, default to first AZ
         if [[ -z "$WORKER_ZONE" ]]; then
             WORKER_ZONE="${REGION}a"
         fi
@@ -164,11 +279,10 @@ fi
 # Resolve openshift-install binary
 resolve_openshift_install "$OCP_VERSION"
 
-# Auto-gate MIG mode
-MIG_MODE=$(get_mig_mode "$GPU" "$MIG_MODE")
-
-# Resolve instance type for display
-INSTANCE_TYPE=$(get_instance_type "$CLOUD" "$GPU")
+# Auto-gate MIG mode (only when GPU is selected)
+if has_gpu; then
+    MIG_MODE=$(get_mig_mode "$GPU" "$MIG_MODE")
+fi
 
 # ============================================================
 # Summary
@@ -176,26 +290,48 @@ INSTANCE_TYPE=$(get_instance_type "$CLOUD" "$GPU")
 log_phase "Cluster Setup Summary"
 echo "  Cluster:       ${CLUSTER_NAME}"
 echo "  Cloud:         ${CLOUD}"
-echo "  GPU:           ${GPU} (${INSTANCE_TYPE})"
+if has_gpu; then
+    echo "  GPU:           ${GPU} (${INSTANCE_TYPE})"
+    echo "  MIG Mode:      ${MIG_MODE}"
+else
+    echo "  GPU:           none"
+    echo "  Instance Type: ${INSTANCE_TYPE}"
+fi
 echo "  Region:        ${REGION}"
 echo "  Worker Zone:   ${WORKER_ZONE}"
-echo "  MIG Mode:      ${MIG_MODE}"
 echo "  Pull Secret:   ${PULL_SECRET}"
 echo "  SSH Key:       ${SSH_KEY}"
 echo "  OCP Version:   ${OCP_VERSION}"
 echo "  Installer:     ${OPENSHIFT_INSTALL}"
 echo "  Install Dir:   ${INSTALL_DIR}"
 echo ""
-echo "  Component Versions:"
-echo "    NFD:            ${NFD_CHART_VERSION}"
-echo "    GPU Operator:   ${GPU_OPERATOR_CHART_VERSION}"
-echo "    DRA Driver:     ${DRA_DRIVER_CHART_VERSION}"
-echo ""
+if has_gpu; then
+    echo "  Component Versions:"
+    echo "    NFD:            ${NFD_CHART_VERSION}"
+    echo "    GPU Operator:   ${GPU_OPERATOR_CHART_VERSION}"
+    echo "    DRA Driver:     ${DRA_DRIVER_CHART_VERSION}"
+    echo ""
+fi
+
+# ============================================================
+# Generate config only mode — produce install-config and exit
+# ============================================================
+if [[ "$GENERATE_CONFIG_ONLY" == "true" ]]; then
+    mkdir -p "$INSTALL_DIR"
+    generate_install_config "$CLOUD" "$CLUSTER_NAME" "$GPU" "$REGION" "$WORKER_ZONE" \
+        "$PULL_SECRET" "$SSH_KEY" "$INSTALL_DIR" "$INSTANCE_TYPE"
+    log_success "install-config.yaml generated at ${INSTALL_DIR}/install-config.yaml"
+    exit 0
+fi
 
 # ============================================================
 # Phase execution with skip-to support
 # ============================================================
-PHASES=("cluster" "feature-gates" "cert-manager" "nfd" "gpu-operator" "dra-driver" "smoke-test")
+if has_gpu; then
+    PHASES=("cluster" "feature-gates" "cert-manager" "nfd" "gpu-operator" "dra-driver" "smoke-test")
+else
+    PHASES=("cluster")
+fi
 
 should_run_phase() {
     local phase="$1"
@@ -230,31 +366,36 @@ fi
 # Run phases
 if should_run_phase "cluster"; then
     check_quota "$CLOUD" "$GPU" "$REGION"
-    create_cluster "$CLOUD" "$CLUSTER_NAME" "$GPU" "$REGION" "$WORKER_ZONE" "$PULL_SECRET" "$SSH_KEY" "$INSTALL_DIR"
+    create_cluster "$CLOUD" "$CLUSTER_NAME" "$GPU" "$REGION" "$WORKER_ZONE" "$PULL_SECRET" "$SSH_KEY" "$INSTALL_DIR" "$INSTANCE_TYPE"
 fi
 
-if should_run_phase "feature-gates"; then
-    enable_dra_feature_gates "$MIG_MODE"
-fi
+# GPU-only phases
+if has_gpu; then
+    if should_run_phase "feature-gates"; then
+        enable_dra_feature_gates "$MIG_MODE"
+    fi
 
-if should_run_phase "cert-manager"; then
-    install_cert_manager
-fi
+    if should_run_phase "cert-manager"; then
+        install_cert_manager
+    fi
 
-if should_run_phase "nfd"; then
-    install_nfd
-fi
+    if should_run_phase "nfd"; then
+        install_nfd
+    fi
 
-if should_run_phase "gpu-operator"; then
-    install_gpu_operator "$MIG_MODE"
-fi
+    if should_run_phase "gpu-operator"; then
+        install_gpu_operator "$MIG_MODE"
+    fi
 
-if should_run_phase "dra-driver"; then
-    install_dra_driver "$GPU" "$MIG_MODE" "$CLOUD"
-fi
+    if should_run_phase "dra-driver"; then
+        install_dra_driver "$GPU" "$MIG_MODE" "$CLOUD"
+    fi
 
-if should_run_phase "smoke-test"; then
-    run_smoke_test "$MIG_MODE"
+    if should_run_phase "smoke-test"; then
+        run_smoke_test "$MIG_MODE"
+    fi
+else
+    log_info "No GPU selected — skipping GPU stack phases"
 fi
 
 log_phase "Setup Complete!"
@@ -263,5 +404,7 @@ echo ""
 echo "  Next steps:"
 echo "    export KUBECONFIG=${KUBECONFIG:-${INSTALL_DIR}/auth/kubeconfig}"
 echo "    oc get nodes"
-echo "    oc get deviceclass"
-echo "    oc get resourceslice"
+if has_gpu; then
+    echo "    oc get deviceclass"
+    echo "    oc get resourceslice"
+fi

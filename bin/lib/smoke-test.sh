@@ -16,7 +16,7 @@ run_smoke_test() {
     # Check DeviceClass CRDs exist
     log_info "Checking DeviceClass..."
     local device_classes
-    device_classes=$(oc get deviceclass 2>/dev/null | tail -n +2 | wc -l)
+    device_classes=$(oc get deviceclass --no-headers 2>/dev/null | wc -l)
     if (( device_classes > 0 )); then
         log_success "DeviceClass(es) found: ${device_classes}"
     else
@@ -27,7 +27,7 @@ run_smoke_test() {
     # Check ResourceSlice CRDs exist
     log_info "Checking ResourceSlice..."
     local resource_slices
-    resource_slices=$(oc get resourceslice 2>/dev/null | tail -n +2 | wc -l)
+    resource_slices=$(oc get resourceslice --no-headers 2>/dev/null | wc -l)
     if (( resource_slices > 0 )); then
         log_success "ResourceSlice(s) found: ${resource_slices}"
     else

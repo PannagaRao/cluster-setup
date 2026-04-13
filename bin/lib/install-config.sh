@@ -11,6 +11,7 @@ TEMPLATE_DIR="$(cd "${SCRIPT_DIR}/../../templates" && pwd)"
 generate_gcp_install_config() {
     local cluster_name="$1" gpu="$2" region="$3" worker_zone="$4"
     local pull_secret_path="$5" ssh_key_path="$6" output_dir="$7"
+    local instance_type_override="${8:-}"
 
     if [[ -z "$GCP_PROJECT" ]]; then
         log_error "GCP_PROJECT environment variable must be set for GCP clusters"
@@ -18,7 +19,11 @@ generate_gcp_install_config() {
     fi
 
     local instance_type
-    instance_type=$(get_instance_type gcp "$gpu")
+    if [[ -n "$instance_type_override" ]]; then
+        instance_type="$instance_type_override"
+    else
+        instance_type=$(get_instance_type gcp "$gpu")
+    fi
 
     local ssh_key
     ssh_key=$(cat "$ssh_key_path")
@@ -35,7 +40,6 @@ generate_gcp_install_config() {
         pull_secret_line="pullSecret: '${pull_secret_raw}'"
     fi
 
-    # Determine disk size based on GPU type
     local disk_size=128
     case "$gpu" in
         a100|h100) disk_size=256 ;;
@@ -46,11 +50,13 @@ generate_gcp_install_config() {
     cp_zones=$(gcloud compute zones list --filter="region=${region}" --format="value(name)" 2>/dev/null | head -3 | paste -sd' ')
     read -ra cp_zone_array <<< "$cp_zones"
 
-    # GPU instances require onHostMaintenance: Terminate
+    # GPU instances require onHostMaintenance: Terminate (not needed for non-GPU)
     local on_host_maintenance=""
-    case "$gpu" in
-        t4|l4|a100|h100) on_host_maintenance="Terminate" ;;
-    esac
+    if [[ "$gpu" != "none" ]]; then
+        case "$gpu" in
+            t4|l4|a100|h100) on_host_maintenance="Terminate" ;;
+        esac
+    fi
 
     cat > "${output_dir}/install-config.yaml" <<EOF
 apiVersion: v1
@@ -106,9 +112,14 @@ EOF
 generate_aws_install_config() {
     local cluster_name="$1" gpu="$2" region="$3" worker_zone="$4"
     local pull_secret_path="$5" ssh_key_path="$6" output_dir="$7"
+    local instance_type_override="${8:-}"
 
     local instance_type
-    instance_type=$(get_instance_type aws "$gpu")
+    if [[ -n "$instance_type_override" ]]; then
+        instance_type="$instance_type_override"
+    else
+        instance_type=$(get_instance_type aws "$gpu")
+    fi
 
     local ssh_key
     ssh_key=$(cat "$ssh_key_path")
@@ -180,6 +191,7 @@ EOF
 generate_install_config() {
     local cloud="$1" cluster_name="$2" gpu="$3" region="$4" worker_zone="$5"
     local pull_secret_path="$6" ssh_key_path="$7" output_dir="$8"
+    local instance_type="${9:-}"
 
     log_phase "Generating install-config.yaml"
 
@@ -196,8 +208,8 @@ generate_install_config() {
     mkdir -p "$output_dir"
 
     case "$cloud" in
-        gcp) generate_gcp_install_config "$cluster_name" "$gpu" "$region" "$worker_zone" "$pull_secret_path" "$ssh_key_path" "$output_dir" ;;
-        aws) generate_aws_install_config "$cluster_name" "$gpu" "$region" "$worker_zone" "$pull_secret_path" "$ssh_key_path" "$output_dir" ;;
+        gcp) generate_gcp_install_config "$cluster_name" "$gpu" "$region" "$worker_zone" "$pull_secret_path" "$ssh_key_path" "$output_dir" "$instance_type" ;;
+        aws) generate_aws_install_config "$cluster_name" "$gpu" "$region" "$worker_zone" "$pull_secret_path" "$ssh_key_path" "$output_dir" "$instance_type" ;;
         *) log_error "Unknown cloud: $cloud"; return 1 ;;
     esac
 }

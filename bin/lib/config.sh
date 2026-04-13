@@ -17,7 +17,36 @@ get_instance_type() {
         aws-t4)   echo "g4dn.xlarge" ;;
         aws-a100) echo "p4d.24xlarge" ;;
         aws-h100) echo "p5.4xlarge" ;;   # 1 H100 with MIG support
+        gcp-none) echo "n2-standard-4" ;;   # default non-GPU instance
+        aws-none) echo "m6i.xlarge" ;;     # default non-GPU instance
         *) echo "ERROR: unsupported cloud-gpu combo: ${cloud}-${gpu}" >&2; return 1 ;;
+    esac
+}
+
+# Detect GPU type from instance type string (reverse of get_instance_type)
+# Returns: t4, l4, a100, h100, maybe-t4, or none
+# "maybe-t4" means GCP n1-* which CAN have a T4 accelerator attached but doesn't by default
+detect_gpu_from_instance_type() {
+    local cloud="$1" instance_type="$2"
+    case "$cloud" in
+        aws)
+            case "$instance_type" in
+                g4dn.*) echo "t4" ;;
+                p4d.*)  echo "a100" ;;
+                p5.*)   echo "h100" ;;
+                *)      echo "none" ;;
+            esac
+            ;;
+        gcp)
+            case "$instance_type" in
+                g2-*)  echo "l4" ;;
+                a2-*)  echo "a100" ;;
+                a3-*)  echo "h100" ;;
+                n1-*)  echo "maybe-t4" ;;  # T4 is optional accelerator add-on
+                *)     echo "none" ;;
+            esac
+            ;;
+        *) echo "none" ;;
     esac
 }
 
@@ -43,7 +72,7 @@ get_instance_vcpus() {
     case "${cloud}-${gpu}" in
         gcp-t4)   echo 8 ;;
 
-        gcp-l4)   echo 4 ;;
+        gcp-l4)   echo 8 ;;  # g2-standard-8
         gcp-a100) echo 12 ;;
         gcp-h100) echo 26 ;;  # a3-highgpu-1g
         aws-t4)   echo 4 ;;
@@ -96,15 +125,17 @@ get_mig_mode() {
 # Zone Priorities (fallback order on stockout)
 # ============================================================
 get_zone_priority() {
-    local cloud="$1" gpu="$2"
+    local cloud="$1" gpu="${2:-none}"
     case "${cloud}-${gpu}" in
         gcp-t4)   echo "us-central1-a us-central1-b us-central1-c us-east1-b us-east1-c us-east1-d" ;;
         gcp-l4)   echo "us-central1-a us-central1-b us-central1-c us-east1-b us-east1-c us-east1-d us-west1-a us-west1-b us-west1-c" ;;
         gcp-a100) echo "us-central1-f us-central1-a us-central1-b us-central1-c us-west1-b us-east1-b" ;;
         gcp-h100) echo "us-central1-a us-central1-b us-central1-c europe-west1-b europe-west1-c us-west1-a" ;;
+        gcp-none) echo "us-central1-a us-central1-b us-central1-c" ;;
         aws-t4)   echo "ap-south-1a ap-south-1b ap-south-1c us-east-1a us-east-1b us-east-1c" ;;
         aws-a100) echo "ap-south-1a ap-south-1b ap-south-1c us-east-1a us-east-1b us-east-1c" ;;
         aws-h100) echo "ap-south-1a ap-south-1b ap-south-1c us-east-1a us-east-1b us-east-1c" ;;
+        aws-none) echo "us-east-1a us-east-1b us-east-1c" ;;
         *) echo "" ;;
     esac
 }
@@ -121,7 +152,7 @@ get_region_from_zone() {
 
 # Get default region for a cloud+gpu combo
 get_default_region() {
-    local cloud="$1" gpu="$2"
+    local cloud="$1" gpu="${2:-none}"
     local zones
     zones=$(get_zone_priority "$cloud" "$gpu")
     local first_zone
@@ -131,7 +162,7 @@ get_default_region() {
 
 # Get default worker zone (first in priority list)
 get_default_worker_zone() {
-    local cloud="$1" gpu="$2"
+    local cloud="$1" gpu="${2:-none}"
     get_zone_priority "$cloud" "$gpu" | awk '{print $1}'
 }
 
@@ -141,7 +172,8 @@ get_default_worker_zone() {
 GCP_PROJECT="${GCP_PROJECT:-}"
 GCP_BASE_DOMAIN="${GCP_BASE_DOMAIN:-gcp.devcluster.openshift.com}"
 GCP_CONTROL_PLANE_TYPE="${GCP_CONTROL_PLANE_TYPE:-n2-standard-4}"
-GCP_CONTROL_PLANE_ZONES=("us-central1-a" "us-central1-b" "us-central1-c")
+# NOTE: GCP control plane zones are resolved dynamically from the chosen region
+# in install-config.sh via: gcloud compute zones list --filter="region=${region}"
 
 # ============================================================
 # AWS Defaults

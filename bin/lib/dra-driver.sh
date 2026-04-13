@@ -266,6 +266,6 @@ spec:
 KEEPALIVE_EOF
 
     # Wait for keepalive pod
-    wait_for_pods_running "pd-test" "" 120 || true
+    oc wait --for=condition=Ready pod/keepalive-gpu0 -n pd-test --timeout=120s 2>/dev/null || true
     log_success "MIG keepalive pod deployed"
 }

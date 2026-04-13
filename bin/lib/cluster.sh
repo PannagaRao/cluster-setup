@@ -99,9 +99,14 @@ destroy_cluster() {
 create_cluster() {
     local cloud="$1" cluster_name="$2" gpu="$3" region="$4" worker_zone="$5"
     local pull_secret_path="$6" ssh_key_path="$7" install_dir="$8"
+    local instance_type="${9:-}"
 
     log_phase "Creating OpenShift Cluster"
-    log_info "Cloud: ${cloud} | GPU: ${gpu} | Region: ${region} | Zone: ${worker_zone}"
+    if [[ "$gpu" != "none" ]]; then
+        log_info "Cloud: ${cloud} | GPU: ${gpu} (${instance_type}) | Region: ${region} | Zone: ${worker_zone}"
+    else
+        log_info "Cloud: ${cloud} | Instance: ${instance_type} | Region: ${region} | Zone: ${worker_zone}"
+    fi
     log_info "Cluster: ${cluster_name}"
 
     # Setup cloud credentials
@@ -121,7 +126,7 @@ create_cluster() {
 
     # Generate install-config
     generate_install_config "$cloud" "$cluster_name" "$gpu" "$region" "$worker_zone" \
-        "$pull_secret_path" "$ssh_key_path" "$install_dir"
+        "$pull_secret_path" "$ssh_key_path" "$install_dir" "$instance_type"
 
     # Keep a backup (openshift-install consumes the file)
     cp "${install_dir}/install-config.yaml" "${install_dir}/install-config.yaml.bak"
@@ -134,24 +139,75 @@ create_cluster() {
         cp "${install_dir}/install-config.yaml.bak" "${install_dir}/install-config.yaml"
     fi
 
-    # Create cluster
+    # Create cluster with parallel worker monitoring
     log_info "Running openshift-install create cluster (this takes 30-45 minutes)..."
-    "$OPENSHIFT_INSTALL" create cluster --dir="$install_dir" --log-level=info 2>&1 | tee "${install_dir}/install.log" || {
-        log_error "openshift-install failed. Check ${install_dir}/install.log"
+    local installer_pid="" monitor_pid=""
+    trap 'kill $installer_pid $monitor_pid 2>/dev/null || true; exit 1' INT TERM
+    "$OPENSHIFT_INSTALL" create cluster --dir="$install_dir" --log-level=info 2>&1 | tee "${install_dir}/install.log" &
+    installer_pid=$!
+
+    # Wait for kubeconfig to appear (bootstrap complete) before starting worker monitoring
+    log_info "Waiting for bootstrap to complete (kubeconfig to appear)..."
+    local bootstrap_elapsed=0
+    while (( bootstrap_elapsed < 2400 )); do  # 40 min max for bootstrap
+        if [[ -f "${install_dir}/auth/kubeconfig" ]]; then
+            export KUBECONFIG="${install_dir}/auth/kubeconfig"
+            log_success "Bootstrap complete. KUBECONFIG available."
+            break
+        fi
+        # Check if installer already exited (early failure)
+        if ! kill -0 "$installer_pid" 2>/dev/null; then
+            wait "$installer_pid" || true
+            if [[ -f "${install_dir}/auth/kubeconfig" ]]; then
+                export KUBECONFIG="${install_dir}/auth/kubeconfig"
+                break
+            fi
+            log_error "openshift-install failed before bootstrap completed. Check ${install_dir}/install.log"
+            return 1
+        fi
+        sleep 15
+        bootstrap_elapsed=$(( bootstrap_elapsed + 15 ))
+    done
+
+    if [[ -z "${KUBECONFIG:-}" ]]; then
+        log_error "Bootstrap timed out after 40 minutes. Check ${install_dir}/install.log"
+        kill "$installer_pid" 2>/dev/null || true
         return 1
-    }
+    fi
 
-    # Set KUBECONFIG
-    export KUBECONFIG="${install_dir}/auth/kubeconfig"
-    log_success "Cluster created. KUBECONFIG=${KUBECONFIG}"
+    # Start worker monitoring in parallel with installer
+    # This detects ZONE_RESOURCE_POOL_EXHAUSTED and does zone fallback
+    log_phase "Monitoring Worker Provisioning (parallel with installer)"
+    if [[ "$gpu" != "none" ]]; then
+        monitor_worker_provisioning "$cloud" "$gpu" 1800 "$region" &
+        monitor_pid=$!
+    else
+        wait_for_nodes_ready 1800 1 &
+        monitor_pid=$!
+    fi
 
-    # Monitor worker node provisioning with zone fallback
-    log_phase "Monitoring Worker Provisioning"
-    monitor_worker_provisioning "$cloud" "$gpu" 1800
+    # Wait for installer to finish
+    local install_rc=0
+    wait "$installer_pid" || install_rc=$?
+
+    # Wait for monitor to finish (may still be doing zone fallback)
+    local monitor_rc=0
+    wait "$monitor_pid" || monitor_rc=$?
+
+    if [[ $install_rc -eq 0 ]]; then
+        log_success "Cluster created successfully."
+    elif [[ $monitor_rc -eq 0 ]]; then
+        # Installer reported error but worker is ready (zone fallback may have saved it)
+        log_warn "openshift-install exited with rc=${install_rc} but worker is ready."
+    else
+        log_error "Cluster creation failed. Installer rc=${install_rc}, monitor rc=${monitor_rc}"
+        log_error "Check ${install_dir}/install.log"
+        return 1
+    fi
 
     # Patch MachineSet for GPU accelerator if needed (GCP T4)
-    if needs_machineset_gpu_patch "$cloud" "$gpu"; then
-        patch_machineset_gpu_accelerator "$cloud" "$gpu"
+    if [[ "$gpu" != "none" ]] && needs_machineset_gpu_patch "$cloud" "$gpu"; then
+        patch_machineset_gpu_accelerator "$cloud" "$gpu" "$region"
     fi
 
     # Final verification
@@ -161,8 +217,9 @@ create_cluster() {
 
 # Patch worker MachineSet to add GPU accelerator
 # Required for GCP T4: install-config accelerator field is ignored by the installer
+# Includes zone fallback: if machine fails with capacity error, tries next zone
 patch_machineset_gpu_accelerator() {
-    local cloud="$1" gpu="$2"
+    local cloud="$1" gpu="$2" region="${3:-}"
 
     log_phase "Patching MachineSet for GPU Accelerator"
 
@@ -176,7 +233,6 @@ patch_machineset_gpu_accelerator() {
     # Get the worker MachineSet name
     local machineset
     machineset=$(oc get machinesets.machine.openshift.io -n openshift-machine-api \
-        -l machine.openshift.io/cluster-api-machine-role=worker \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
     if [[ -z "$machineset" ]]; then
@@ -195,8 +251,7 @@ patch_machineset_gpu_accelerator() {
     while (( elapsed < 300 )); do
         local count
         count=$(oc get machines.machine.openshift.io -n openshift-machine-api \
-            -l machine.openshift.io/cluster-api-machine-role=worker \
-            --no-headers 2>/dev/null | wc -l)
+                --no-headers 2>/dev/null | grep -c "worker" || true)
         if (( count == 0 )); then
             break
         fi
@@ -229,11 +284,95 @@ patch_machineset_gpu_accelerator() {
 
     log_success "MachineSet patched with ${accelerator_type}"
 
-    # Scale back up
+    # Scale back up and monitor with zone fallback
     oc scale machineset.machine.openshift.io "$machineset" -n openshift-machine-api --replicas=1
     log_info "Scaled MachineSet back to 1, waiting for GPU worker node..."
 
-    # Wait for new worker with GPU to be Ready
-    wait_for_nodes_ready 1200 1
-    log_success "GPU worker node is Ready"
+    # Get zone fallback list filtered to region
+    local zones zone_array current_zone_idx=0
+    zones=$(get_zone_priority "$cloud" "$gpu")
+    if [[ -n "$region" ]]; then
+        local filtered=""
+        for z in $zones; do
+            if [[ "$(get_region_from_zone "$cloud" "$z")" == "$region" ]]; then
+                filtered="${filtered:+$filtered }$z"
+            fi
+        done
+        if [[ -n "$filtered" ]]; then
+            zones="$filtered"
+        fi
+    fi
+    read -ra zone_array <<< "$zones"
+
+    # Monitor with zone fallback
+    elapsed=0
+    local timeout=1200
+    local poll_interval=15
+    while (( elapsed < timeout )); do
+        # Check if worker is Ready
+        local ready
+        ready=$(oc get nodes -l node-role.kubernetes.io/worker --no-headers 2>/dev/null | grep -c " Ready" || true)
+        if (( ready > 0 )); then
+            log_success "GPU worker node is Ready"
+            return 0
+        fi
+
+        # Check for failed worker machines (capacity errors)
+        local failed_phase
+        failed_phase=$(oc get machines.machine.openshift.io -n openshift-machine-api \
+            -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{"\n"}{end}' 2>/dev/null \
+            | grep worker | grep -o "Failed" | head -1 || true)
+
+        if [[ "$failed_phase" == "Failed" ]]; then
+            local fail_msg
+            fail_msg=$(oc get machines.machine.openshift.io -n openshift-machine-api -o json 2>/dev/null \
+                | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for m in data.get('items', []):
+    if 'worker' in m['metadata']['name'] and m.get('status',{}).get('phase') == 'Failed':
+        for c in m.get('status',{}).get('conditions',[]):
+            print(c.get('message',''))
+        break
+" 2>/dev/null || true)
+
+            if echo "$fail_msg" | grep -qi -e "capacity" -e "exhausted" -e "ZONE_RESOURCE_POOL"; then
+                current_zone_idx=$(( current_zone_idx + 1 ))
+                if (( current_zone_idx >= ${#zone_array[@]} )); then
+                    log_error "All zones exhausted for ${gpu} GPU in ${region:-all regions}"
+                    return 1
+                fi
+                local new_zone="${zone_array[$current_zone_idx]}"
+                log_warn "Capacity error in current zone. Trying zone: ${new_zone}"
+
+                # Delete only failed worker machines
+                oc get machines.machine.openshift.io -n openshift-machine-api -o name 2>/dev/null \
+                    | grep worker | while read -r m; do
+                    local phase
+                    phase=$(oc get "$m" -n openshift-machine-api -o jsonpath='{.status.phase}' 2>/dev/null || true)
+                    if [[ "$phase" == "Failed" ]]; then
+                        oc delete "$m" -n openshift-machine-api 2>/dev/null || true
+                    fi
+                done
+
+                # Patch MachineSet to new zone (GCP path)
+                oc patch machineset.machine.openshift.io "$machineset" -n openshift-machine-api --type=merge \
+                    -p "{\"spec\":{\"template\":{\"spec\":{\"providerSpec\":{\"value\":{\"zone\":\"${new_zone}\"}}}}}}" 2>/dev/null || true
+
+                # Scale back up in new zone
+                oc scale machineset.machine.openshift.io "$machineset" -n openshift-machine-api --replicas=1
+                log_info "MachineSet patched to zone ${new_zone}, waiting for worker..."
+            else
+                log_error "Machine failed (non-capacity): ${fail_msg}"
+                return 1
+            fi
+        fi
+
+        sleep "$poll_interval"
+        elapsed=$(( elapsed + poll_interval ))
+        echo -ne "\r  Elapsed: ${elapsed}s / ${timeout}s"
+    done
+    echo ""
+    log_error "GPU worker node did not become Ready within ${timeout}s"
+    return 1
 }

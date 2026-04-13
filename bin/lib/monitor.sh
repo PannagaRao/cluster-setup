@@ -132,9 +132,23 @@ wait_for_resource() {
 # Returns 0 if worker is ready, 1 if all zones exhausted
 # Fast polling (15s) for first 5min to catch capacity errors quickly
 monitor_worker_provisioning() {
-    local cloud="$1" gpu="$2" timeout="${3:-1800}"  # 30 min default
+    local cloud="$1" gpu="$2" timeout="${3:-1800}" region="${4:-}"  # 30 min default
     local zones zone_array current_zone_idx=0
     zones=$(get_zone_priority "$cloud" "$gpu")
+
+    # Filter zones to the user's chosen region
+    if [[ -n "$region" ]]; then
+        local filtered=""
+        for z in $zones; do
+            if [[ "$(get_region_from_zone "$cloud" "$z")" == "$region" ]]; then
+                filtered="${filtered:+$filtered }$z"
+            fi
+        done
+        if [[ -n "$filtered" ]]; then
+            zones="$filtered"
+        fi
+    fi
+
     read -ra zone_array <<< "$zones"
 
     log_info "Monitoring worker provisioning (zones: ${zones})"
@@ -148,21 +162,22 @@ monitor_worker_provisioning() {
             return 0
         fi
 
-        # Check for failed machines (check fast for capacity errors in first 5 min)
+        # Check for failed worker machines (capacity errors)
         local failed_machines
         failed_machines=$(oc get machines.machine.openshift.io -n openshift-machine-api \
-            -l machine.openshift.io/cluster-api-machine-role=worker \
-            -o json 2>/dev/null | python3 -c "
+                -o json 2>/dev/null | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 for m in data.get('items', []):
-    phase = m.get('status', {}).get('phase', '')
     name = m['metadata']['name']
+    if 'worker' not in name:
+        continue
+    phase = m.get('status', {}).get('phase', '')
     if phase == 'Failed':
         conditions = m.get('status', {}).get('conditions', [])
         for c in conditions:
             msg = c.get('message', '').lower()
-            if 'insufficient' in msg or 'capacity' in msg:
+            if 'insufficient' in msg or 'capacity' in msg or 'zone_resource_pool' in msg:
                 print(f'{name}|capacity')
                 break
 " 2>/dev/null || true)
@@ -179,14 +194,12 @@ for m in data.get('items', []):
 
                 local machineset
                 machineset=$(oc get machinesets.machine.openshift.io -n openshift-machine-api \
-                    -l machine.openshift.io/cluster-api-machine-role=worker \
-                    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                                -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
                 if [[ -n "$machineset" ]]; then
-                    # Delete failed machines
+                    # Delete only failed worker machines
                     oc get machines.machine.openshift.io -n openshift-machine-api \
-                        -l machine.openshift.io/cluster-api-machine-role=worker \
-                        -o name 2>/dev/null | while read -r m; do
+                                        -o name 2>/dev/null | grep worker | while read -r m; do
                         local phase
                         phase=$(oc get "$m" -n openshift-machine-api -o jsonpath='{.status.phase}' 2>/dev/null || true)
                         if [[ "$phase" == "Failed" ]]; then

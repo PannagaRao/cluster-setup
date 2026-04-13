@@ -66,34 +66,50 @@ delete_namespace() {
 }
 
 uninstall_resources() {
-    log_phase "Removing GPU/DRA Resources"
+    log_phase "Checking for GPU/DRA Resources"
 
-    # Uninstall DRA driver
-    log_info "Uninstalling DRA driver..."
-    helm uninstall nvidia-dra-driver-gpu -n nvidia-dra-driver-gpu 2>/dev/null || true
-    delete_namespace nvidia-dra-driver-gpu 30
+    local has_gpu_resources=false
 
-    # Delete GPU operator ClusterPolicy
-    log_info "Removing GPU operator..."
-    oc delete clusterpolicy --all --wait=false 2>/dev/null || true
-    sleep 5
-    helm uninstall gpu-operator -n nvidia-gpu-operator 2>/dev/null || true
-    delete_namespace nvidia-gpu-operator 30
+    # Check if any GPU/DRA namespaces exist
+    if oc get namespace nvidia-dra-driver-gpu &>/dev/null; then
+        has_gpu_resources=true
+        log_info "Uninstalling DRA driver..."
+        helm uninstall nvidia-dra-driver-gpu -n nvidia-dra-driver-gpu 2>/dev/null || true
+        delete_namespace nvidia-dra-driver-gpu 30
+    fi
 
-    # Uninstall NFD
-    log_info "Removing NFD..."
-    helm uninstall node-feature-discovery -n node-feature-discovery 2>/dev/null || true
-    delete_namespace node-feature-discovery 30
+    if oc get namespace nvidia-gpu-operator &>/dev/null; then
+        has_gpu_resources=true
+        log_info "Removing GPU operator..."
+        oc delete clusterpolicy --all --wait=false 2>/dev/null || true
+        sleep 5
+        helm uninstall gpu-operator -n nvidia-gpu-operator 2>/dev/null || true
+        delete_namespace nvidia-gpu-operator 30
+    fi
 
-    # Clean up NVIDIA CRDs
-    log_info "Cleaning up CRDs..."
-    oc get crd -o name 2>/dev/null | grep -i nvidia | xargs -r oc delete 2>/dev/null || true
+    if oc get namespace node-feature-discovery &>/dev/null; then
+        has_gpu_resources=true
+        log_info "Removing NFD..."
+        helm uninstall node-feature-discovery -n node-feature-discovery 2>/dev/null || true
+        delete_namespace node-feature-discovery 30
+    fi
 
-    log_success "Resource cleanup complete"
+    # Clean up NVIDIA CRDs if any exist
+    local nvidia_crds
+    nvidia_crds=$(oc get crd -o name 2>/dev/null | grep -E 'nvidia\.com|gpu-operator' || true)
+    if [[ -n "$nvidia_crds" ]]; then
+        has_gpu_resources=true
+        log_info "Cleaning up NVIDIA CRDs..."
+        echo "$nvidia_crds" | xargs -r oc delete 2>/dev/null || true
+    fi
 
-    # Verify
-    log_info "Remaining NVIDIA pods:"
-    oc get pods -A 2>/dev/null | grep -i nvidia || echo "  (none)"
+    if [[ "$has_gpu_resources" == "true" ]]; then
+        log_success "GPU/DRA resource cleanup complete"
+        log_info "Remaining NVIDIA pods:"
+        oc get pods -A 2>/dev/null | grep -i nvidia || echo "  (none)"
+    else
+        log_info "No GPU/DRA resources found — nothing to clean up"
+    fi
 }
 
 destroy_cluster() {

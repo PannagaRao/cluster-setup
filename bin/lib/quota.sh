@@ -153,8 +153,8 @@ check_aws_quota() {
     local vcpu_needed
     vcpu_needed=$(get_instance_vcpus aws "$gpu")
 
-    # Also account for control plane instances (~16 vCPUs for 3x m6i.xlarge)
-    local total_needed=$(( vcpu_needed + 16 ))
+    # Control plane uses m6i (general purpose), not GPU instances — don't add to GPU quota
+    local total_needed=$vcpu_needed
 
     if [[ -z "$vcpu_limit" || "$vcpu_limit" == "None" ]]; then
         log_error "AWS vCPU quota not found in ${region} for ${quota_code}"
@@ -184,6 +184,33 @@ check_quota() {
     local cloud="$1" gpu="$2" region="$3"
 
     log_phase "Pre-flight Quota Check"
+
+    # No GPU: skip GPU metric queries, verify credentials only
+    if [[ "$gpu" == "none" ]]; then
+        log_info "No GPU selected — skipping GPU quota check"
+        case "$cloud" in
+            gcp)
+                if [[ -z "$GCP_PROJECT" ]]; then
+                    log_error "GCP_PROJECT environment variable must be set"
+                    return 1
+                fi
+                if ! gcloud projects describe "$GCP_PROJECT" &>/dev/null; then
+                    log_error "Cannot access GCP project: ${GCP_PROJECT}"
+                    return 1
+                fi
+                log_success "GCP project ${GCP_PROJECT} accessible"
+                ;;
+            aws)
+                if ! aws sts get-caller-identity &>/dev/null; then
+                    log_error "AWS credentials not valid"
+                    return 1
+                fi
+                log_success "AWS credentials valid"
+                ;;
+            *)  log_error "Unknown cloud: $cloud"; return 1 ;;
+        esac
+        return 0
+    fi
 
     case "$cloud" in
         gcp) check_gcp_quota "$gpu" "$region" ;;
