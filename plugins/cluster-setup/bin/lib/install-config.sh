@@ -136,11 +136,6 @@ generate_aws_install_config() {
         pull_secret_line="pullSecret: '${pull_secret_raw}'"
     fi
 
-    local disk_size=128
-    case "$gpu" in
-        a100|h100) disk_size=256 ;;
-    esac
-
     cat > "${output_dir}/install-config.yaml" <<EOF
 apiVersion: v1
 metadata:
@@ -155,17 +150,12 @@ compute:
       type: ${instance_type}
       zones:
       - ${worker_zone}
-      rootVolume:
-        size: ${disk_size}
-        type: gp3
   replicas: 1
 controlPlane:
   architecture: amd64
   hyperthreading: Enabled
   name: master
-  platform:
-    aws:
-      type: ${AWS_CONTROL_PLANE_TYPE}
+  platform: {}
   replicas: 3
 networking:
   clusterNetwork:
@@ -179,7 +169,6 @@ networking:
 platform:
   aws:
     region: ${region}
-publish: External
 ${pull_secret_line}
 sshKey: '${ssh_key}'
 EOF
