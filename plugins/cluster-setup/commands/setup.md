@@ -194,7 +194,7 @@ Phases: cluster creation only
 Before running the setup script, generate the install-config.yaml so the user can review it. Run `bin/setup.sh` with `--generate-config-only` to produce the file without starting the cluster:
 
 ```bash
-bash bin/setup.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh \
   --cluster-name <name> \
   --cloud <cloud> \
   --region <region> \
@@ -218,7 +218,7 @@ Wait for confirmation before running the full setup.
 
 ### Non-GPU cluster:
 ```bash
-bash bin/setup.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh \
   --cluster-name <name> \
   --cloud <cloud> \
   --region <region> \
@@ -231,7 +231,7 @@ bash bin/setup.sh \
 
 ### GPU-only cluster (no DRA stack):
 ```bash
-bash bin/setup.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh \
   --cluster-name <name> \
   --cloud <cloud> \
   --region <region> \
@@ -243,7 +243,7 @@ bash bin/setup.sh \
 
 ### GPU+DRA cluster (OCP 4.21+ required):
 ```bash
-bash bin/setup.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh \
   --cluster-name <name> \
   --cloud <cloud> \
   --region <region> \

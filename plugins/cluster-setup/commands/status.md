@@ -4,7 +4,7 @@ Run a health check on the current GPU test cluster.
 
 Set KUBECONFIG if needed, then run:
 ```bash
-bash bin/status.sh
+bash ${CLAUDE_PLUGIN_ROOT}/bin/status.sh
 ```
 
 Present the results in a clear format. If any component is unhealthy, suggest the fix:

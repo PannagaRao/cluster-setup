@@ -1,0 +1,9 @@
+{
+  "name": "cluster-setup",
+  "description": "Set up OpenShift clusters with optional NVIDIA GPU and DRA (Dynamic Resource Allocation) support on AWS and GCP",
+  "version": "1.0.0",
+  "author": {
+    "name": "Pannaga Rao"
+  },
+  "repository": "https://github.com/PannagaRao/cluster-setup"
+}

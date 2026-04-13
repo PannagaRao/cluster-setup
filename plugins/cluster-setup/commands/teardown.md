@@ -19,12 +19,12 @@ oc get namespace nvidia-dra-driver-gpu nvidia-gpu-operator node-feature-discover
 ```
 
 **If DRA resources exist:** Ask the user — "Remove just the DRA stack, or destroy the entire cluster?"
-- DRA stack only: `bash bin/teardown.sh --resources-only --cluster-name <name>`
-- Full destroy: `bash bin/teardown.sh --cluster-name <name>`
+- DRA stack only: `bash ${CLAUDE_PLUGIN_ROOT}/bin/teardown.sh --resources-only --cluster-name <name>`
+- Full destroy: `bash ${CLAUDE_PLUGIN_ROOT}/bin/teardown.sh --cluster-name <name>`
 
 **If no DRA resources:** Skip the question, go straight to full destroy:
 ```bash
-bash bin/teardown.sh --cluster-name <name>
+bash ${CLAUDE_PLUGIN_ROOT}/bin/teardown.sh --cluster-name <name>
 ```
 
 ## Run teardown

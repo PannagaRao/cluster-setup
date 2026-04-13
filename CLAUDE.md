@@ -1,170 +1,31 @@
-# cluster-setup-with-gpu
+# cluster-setup
 
-Claude Code workspace for setting up OpenShift clusters, optionally with NVIDIA GPUs and DRA (Dynamic Resource Allocation) support.
+Claude Code plugin marketplace for setting up OpenShift clusters with optional NVIDIA GPU and DRA support.
 
-## Slash Commands
+## Plugin Structure
 
-- `/setup` — Interactive cluster creation wizard (GPU optional)
-- `/teardown` — Remove resources or destroy cluster
-- `/status` — Health check all components
-- `/test` — Run GPU/DRA smoke tests
+This repo is a Claude Code plugin marketplace. The plugin lives in `plugins/cluster-setup/`.
 
-**Always use these slash commands** for cluster operations instead of calling `bin/setup.sh`, `bin/teardown.sh`, etc. directly. The skills handle progress reporting, error recovery, and user interaction properly.
+## Commands (when installed as plugin)
 
-### Non-GPU Clusters
+- `/cluster-setup:setup` — Interactive cluster creation wizard
+- `/cluster-setup:teardown` — Remove resources or destroy cluster
+- `/cluster-setup:status` — Health check all components
+- `/cluster-setup:test` — Run GPU/DRA smoke tests
 
-The `/setup` command supports creating general-purpose clusters without GPU:
-- Asks for cloud provider first, then queries available machine types
-- User picks an instance type; GPU-specific phases are skipped
-- Worker instance type set via `--instance-type` (defaults: `n2-standard-4` on GCP, `m6i.xlarge` on AWS)
+## Local Development
 
-### GPU Without DRA Stack
+Scripts are at `plugins/cluster-setup/bin/`. Run directly:
 
-`--gpu <type>` provisions GPU hardware (correct instance type, MachineSet patching, `onHostMaintenance` settings) but does **not** install the DRA stack by default. The DRA stack is opt-in via `--dra`.
+```bash
+bash plugins/cluster-setup/bin/setup.sh --help
+bash plugins/cluster-setup/bin/teardown.sh --cluster-name my-cluster
+```
 
-### DRA Stack (requires OCP 4.21+)
+## Key Knowledge
 
-`--dra` installs the full NVIDIA DRA stack on top of GPU hardware: feature gates, cert-manager, NFD, GPU Operator, DRA Driver. Requires:
-- A GPU (`--gpu` or GPU-capable `--instance-type`)
-- OCP 4.21+ (K8s 1.34+) — the DRA stack uses `resource.k8s.io/v1` and feature gates that only exist in K8s 1.34+
-
-The `/setup` skill automatically asks whether to install the DRA stack when GPU is selected and OCP version is 4.21+.
-
-## GPU Instance Matrix
-
-| GPU  | GCP Instance      | AWS Instance    | GPUs | MIG |
-|------|-------------------|-----------------|------|-----|
-| T4   | n1-standard-4 + nvidia-tesla-t4 accelerator | g4dn.xlarge | 1 | No |
-| L4   | g2-standard-8     | (GCP only)      | 1    | No  |
-| A100 | a2-highgpu-1g     | p4d.24xlarge    | 1/8  | Yes |
-| H100 | a3-highgpu-1g     | p5.4xlarge      | 1    | Yes |
-
-### Quota Status (as of March 2026)
-
-**GCP (set via `GCP_PROJECT` env var):**
-- T4: 16 GPUs quota in us-central1 — works
-- A100: 10 GPUs quota, A2_CPUS=0 but general CPUS=1000 covers it — works
-- H100: No quota at all — needs quota request
-
-**AWS (set via `AWS_PROFILE` or `~/.aws/credentials`):**
-- T4: 920 G-instance vCPUs — works
-- A100: 692 P-instance vCPUs — works
-- H100: 692 P-instance vCPUs — works
-
-### H100 Setup Strategy
-
-When H100 is requested and GCP quota check fails:
-1. Suggest AWS instead of A100 downgrade — AWS p5.48xlarge is more readily available
-2. Before starting setup, check zone availability with: `aws ec2 describe-instance-type-offerings --filters "Name=instance-type,Values=p5.48xlarge" --region <REGION>`
-
-## Setup Phases (in order)
-
-> **Phase behavior by flag:**
-> - `--gpu` only: phases 1-2 run (cluster with GPU hardware)
-> - `--gpu --dra`: all phases run (cluster + full DRA stack, requires OCP 4.21+)
-> - No GPU: phase 1-2 only (general-purpose cluster)
-
-1. **Quota check** — verify cloud has enough GPU/CPU quota (credential-only check when no GPU)
-2. **Cluster creation** — openshift-install with zone fallback on stockout
-3. **Feature gates** — enable DRA feature gates, wait for MCP rollout *(`--dra` only)*
-4. **cert-manager** — install cert-manager operator *(`--dra` only)*
-5. **NFD** — Node Feature Discovery + manual GPU labeling *(`--dra` only)*
-6. **GPU Operator** — NVIDIA GPU Operator with DRA enabled, device plugin DISABLED *(`--dra` only)*
-7. **DRA Driver** — NVIDIA DRA Driver (MIG mode auto-gated by GPU type) *(`--dra` only)*
-8. **Smoke test** — submit GPU job, verify GPU access via DRA *(`--dra` only)*
-
-Each phase has active monitoring: polls until success or timeout, surfaces pod logs/events on failure.
-
-## Critical Workarounds
-
-These are hard-won lessons — do not remove without understanding why they exist:
-
-1. **install-config accelerators field is ignored** — for GCP T4, the accelerator field in install-config.yaml is silently ignored by the installer. The cluster must be created with `n1-standard-4` (no GPU), then the worker MachineSet is patched post-install to add `nvidia-tesla-t4` accelerator with `onHostMaintenance: Terminate`. The old worker is scaled down, patched, and scaled back up. A100/H100 use dedicated GPU instance types (a2/a3) so this is only needed for T4.
-
-2. **devicePlugin.enabled=false** — MUST be false in GPU Operator when using DRA. If left true, the standard device plugin conflicts with the DRA driver.
-
-3. **DynamicMIG=false for T4** — T4 GPUs do not support MIG partitioning. The DRA driver will fail if DynamicMIG is enabled on non-MIG hardware.
-
-4. **Manual NFD node labeling** — automatic NFD detection can be slow or miss GPUs on fresh clusters. Scripts manually label nodes with `nvidia.com/gpu.present=true` as backup.
-
-5. **SCC grants required** — OpenShift requires explicit Security Context Constraint grants for every NVIDIA service account. Missing grants cause pods to fail with permission denied.
-
-6. **MachineSet patching for zone fallback** — when a zone runs out of GPU capacity, patch the MachineSet to a different zone within the same region. **Important:** you must also update the subnet filter to match the new zone, otherwise machine creation fails with "no subnet IDs found". The installer creates subnets in all AZs for the control plane, so valid subnets exist.
-
-   **AWS:**
-   ```bash
-   MACHINESET=$(oc get machineset -n openshift-machine-api -o jsonpath='{.items[0].metadata.name}')
-   # Patch zone
-   oc patch machineset $MACHINESET -n openshift-machine-api --type=merge \
-     -p '{"spec":{"template":{"spec":{"providerSpec":{"value":{"placement":{"availabilityZone":"<NEW_ZONE>"}}}}}}}'
-   # Patch subnet filter to match new zone
-   oc patch machineset $MACHINESET -n openshift-machine-api --type=json \
-     -p '[{"op":"replace","path":"/spec/template/spec/providerSpec/value/subnet/filters/0/values/0","value":"<CLUSTER_INFRA_ID>-subnet-private-<NEW_ZONE>"}]'
-   # Delete stuck machine so a new one is created
-   oc delete machine -n openshift-machine-api -l machine.openshift.io/cluster-api-machineset=$MACHINESET
-   oc get machines -n openshift-machine-api -w
-   ```
-
-   **GCP** (different path — `value.zone` instead of `value.placement.availabilityZone`):
-   ```bash
-   oc patch machineset $MACHINESET -n openshift-machine-api --type=merge \
-     -p '{"spec":{"template":{"spec":{"providerSpec":{"value":{"zone":"<NEW_ZONE>"}}}}}}'
-   ```
-
-   **Note:** Zone fallback only works within the same region. If all zones exhausted, destroy cluster (`/teardown`) and recreate in different region.
-
-7. **Worker provisioning monitoring** — Setup script actively monitors worker machine creation with adaptive polling (15s for first 5min, then 30s) to detect capacity errors immediately, rather than waiting for timeout. Failed zones are auto-retried with fallback.
-
-8. **SharedCounterSets timing** — with DynamicMIG, ResourceSlice may take up to 60s to update after MIG partition creation. Tests should wait for ResourceSlice to show the partition.
-
-9. **A100 DynamicMIG on cloud VMs (GPU reset not supported)** — NVIDIA Ampere GPUs (A100) in cloud VM passthrough (GCP a2-highgpu, AWS p4d) do not support `nvidia-smi --gpu-reset`. MIG mode toggling requires a GPU reset to take effect, so every MIG mode change requires a **full node reboot**. The DRA driver's `DestroyUnknownMIGDevices` startup code calls `SetMigMode(DISABLE)` on every restart, creating an unrecoverable loop where MIG gets disabled on every plugin restart. H100 does not have this issue — it supports GPU reset.
-
-   **Workaround (automated in setup for A100 on GCP/AWS):**
-   1. Use the **patched DRA driver image** (`quay.io/rh-pbhojara/nvidia-driver:v25.12.0-dev-patched`) that skips `DestroyUnknownMIGDevices` on startup
-   2. **Manually enable MIG** via `nvidia-smi -i 0 -mig 1` through the GPU operator driver pod
-   3. **Reboot the worker node** to activate the pending MIG mode change (cordon, drain, reboot, uncordon)
-   4. **Deploy a keepalive pod** (1g.5gb MIG device) to prevent `maybeDisableMigMode` from triggering when all user MIG devices are deleted
-
-   **Checking MIG status:** `oc exec -n nvidia-gpu-operator <driver-pod> -- nvidia-smi --query-gpu=mig.mode.current,mig.mode.pending --format=csv`
-   - `Enabled, Enabled` = stable, ready for MIG workloads
-   - `Disabled, Enabled` = pending reboot to activate
-   - `Enabled, Disabled` = driver requested disable, needs reboot then re-enable
-
-10. **GCP GPU instances require onHostMaintenance: Terminate** — all GPU instance types on GCP (T4, L4, A100, H100) require `onHostMaintenance: Terminate` in the install-config. The installer defaults to `MIGRATE`, which GCP rejects for GPU instances. This is set in the install-config generation (`install-config.sh`), not as a post-install patch.
-
-11. **GCP A2_CPUS quota fallback** — some GCP projects have `A2_CPUS=0` but a general `CPUS` quota that covers A2 instances. The quota check falls back to the general `CPUS` quota when the per-family quota is insufficient.
-
-## Error Recovery
-
-| Error | Cause | Fix |
-|-------|-------|-----|
-| Cluster create auth failure | Stale pull secret | Refresh at console.redhat.com |
-| No worker node after 20 min | GPU stockout in zone | Auto zone fallback handles this; if all zones fail, try different region |
-| Instance not found on provider | GCP instance vanished after creation | Auto retry in same zone (up to 3x), then zone fallback |
-| InsufficientInstanceCapacity | Regional capacity exhausted | Destroy cluster (`/teardown`) and recreate in different region |
-| Cluster initialization timeout | No worker nodes available | Wait for worker to join; check machine status if stuck >5min |
-| MCP Degraded | Feature gate conflict | Check `oc describe mcp`, may need to patch feature gates |
-| GPU driver pod stuck in Init | Kernel module build failure | Delete pod, check driver toolkit image |
-| No ResourceSlice | DRA driver permissions | Verify SCC grants for kubelet-plugin SA |
-| nvidia-smi not found in pod | Wrong container image | Use CUDA-enabled image for GPU workloads |
-| MIG mode "Not Supported" on A100 | Cloud VM GPU reset not supported | Use patched DRA driver image + manual MIG enable + node reboot |
-| MIG Enabled/Disabled after reboot | Unpatched driver called SetMigMode(DISABLE) on startup | Switch to patched image, re-enable MIG, reboot again |
-| onHostMaintenance MIGRATE rejected | GCP GPU instance needs Terminate | Set `onHostMaintenance: Terminate` in install-config or patch MachineSet |
-
-## Key Namespaces
-
-- `cert-manager` — cert-manager operator
-- `node-feature-discovery` — NFD
-- `nvidia-gpu-operator` — GPU Operator + driver
-- `nvidia-dra-driver-gpu` — DRA driver (controller + kubelet-plugin)
-
-## Environment Variables
-
-| Var | Default | Description |
-|-----|---------|-------------|
-| `KUBECONFIG` | (from install dir) | Path to cluster kubeconfig |
-| `OPENSHIFT_INSTALL` | `openshift-install` | Path to openshift-install binary |
-| `GCP_PROJECT` | (required for GCP) | GCP project ID |
-| `GCP_BASE_DOMAIN` | `gcp.devcluster.openshift.com` | GCP base domain |
-| `AWS_BASE_DOMAIN` | `devcluster.openshift.com` | AWS base domain |
-| `OCP_VERSION` | `4.21.0` | OpenShift version |
+- **SKILL.md**: `plugins/cluster-setup/skills/cluster-setup/SKILL.md` — quick-start and decision table
+- **GPU Matrix**: `plugins/cluster-setup/skills/cluster-setup/references/gpu-matrix.md`
+- **DRA Stack**: `plugins/cluster-setup/skills/cluster-setup/references/dra-stack.md`
+- **Workarounds**: `plugins/cluster-setup/skills/cluster-setup/references/workarounds.md`
+- **Error Recovery**: `plugins/cluster-setup/skills/cluster-setup/references/error-recovery.md`
