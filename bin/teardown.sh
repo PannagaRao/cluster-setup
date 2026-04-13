@@ -153,6 +153,9 @@ destroy_cluster() {
 if [[ "$RESOURCES_ONLY" == "true" ]]; then
     uninstall_resources
 else
-    uninstall_resources
+    # Only clean up DRA resources if any exist — don't waste time checking on non-DRA clusters
+    if oc get namespace nvidia-dra-driver-gpu nvidia-gpu-operator node-feature-discovery &>/dev/null 2>&1; then
+        uninstall_resources
+    fi
     destroy_cluster
 fi

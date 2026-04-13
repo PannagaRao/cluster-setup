@@ -2,22 +2,33 @@
 
 Help the user tear down their cluster.
 
-## Ask the user:
-1. **Resources only** or **full cluster destroy**?
-   - Resources only: removes GPU operator, DRA driver, NFD (if installed) but keeps the cluster
-   - Full destroy: removes everything and destroys the OpenShift cluster
-2. **Cluster name** or **install directory** to locate the cluster
+## Gather info
 
-Note: The teardown script automatically detects whether GPU/DRA resources were installed. If no GPU resources are found (e.g. non-GPU cluster), it skips resource cleanup and proceeds directly to cluster destroy.
+Ask for the **cluster name** or **install directory** to locate the cluster.
 
-## Run teardown
-
+If both are unknown, check for recent install directories:
 ```bash
-# Resources only (skips if no GPU resources found)
-bash bin/teardown.sh --resources-only --cluster-name <name>
+ls -dt /tmp/ocp-* 2>/dev/null | head -5
+```
 
-# Full destroy
+## Determine teardown scope
+
+Check if the cluster has DRA resources installed:
+```bash
+oc get namespace nvidia-dra-driver-gpu nvidia-gpu-operator node-feature-discovery 2>/dev/null
+```
+
+**If DRA resources exist:** Ask the user — "Remove just the DRA stack, or destroy the entire cluster?"
+- DRA stack only: `bash bin/teardown.sh --resources-only --cluster-name <name>`
+- Full destroy: `bash bin/teardown.sh --cluster-name <name>`
+
+**If no DRA resources:** Skip the question, go straight to full destroy:
+```bash
 bash bin/teardown.sh --cluster-name <name>
 ```
 
-Confirm before running -- this is destructive and irreversible for cluster destroy.
+## Run teardown
+
+No additional confirmation needed — the user already asked to teardown. Just run it.
+
+Monitor the output. Cluster destruction typically takes 10-20 minutes.
