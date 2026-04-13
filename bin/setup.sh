@@ -15,6 +15,23 @@ source "${LIB_DIR}/gpu-operator.sh"
 source "${LIB_DIR}/dra-driver.sh"
 source "${LIB_DIR}/smoke-test.sh"
 
+# Notify user on failure — cluster may still be running
+on_error() {
+    echo ""
+    log_error "Setup failed!"
+    if [[ -n "${INSTALL_DIR:-}" && -f "${INSTALL_DIR}/metadata.json" ]]; then
+        log_error "The cluster may still be running and incurring costs."
+        log_error "To destroy:  /teardown or bash bin/teardown.sh --install-dir ${INSTALL_DIR}"
+        if [[ -n "${CLUSTER_NAME:-}" && -n "${CLOUD:-}" && -n "${GPU:-}" ]]; then
+            local resume_cmd="bash $(basename "$0") --cluster-name ${CLUSTER_NAME} --cloud ${CLOUD} --pull-secret ${PULL_SECRET:-<path>} --install-dir ${INSTALL_DIR} --skip-cluster"
+            [[ "$GPU" != "none" ]] && resume_cmd+=" --gpu ${GPU}"
+            [[ "${DRA:-false}" == "true" ]] && resume_cmd+=" --dra"
+            log_error "To resume:   ${resume_cmd}"
+        fi
+    fi
+}
+trap on_error ERR
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
