@@ -15,7 +15,7 @@ Ask the user: **"Which cloud provider?"** (`aws` or `gcp`)
 ### 1b. Region
 
 Ask for region or offer a default:
-- GCP default: `us-central1`
+- GCP default: `us-east1`
 - AWS default: `us-east-1`
 
 ### 1c. Cluster Name
@@ -73,7 +73,7 @@ If the cloud CLI command fails (e.g. not authenticated), fall back to presenting
 
 Present categorized (GPU vs general-purpose) and let the user pick.
 
-### 1g. DRA Operator Stack (only for GPU instances)
+### 1g. GPU Detection and DRA Stack (only for GPU instances)
 
 **If the user picked a GPU instance** (g4dn/p4d/p5/g2/a2/a3, or n1-standard with T4):
 
@@ -82,17 +82,22 @@ Auto-detect the GPU type from the instance family:
 - GCP: `g2-*` -> L4, `a2-*` -> A100, `a3-*` -> H100
 - GCP `n1-standard-*`: Ask "Do you want to attach a T4 GPU accelerator?"
 
-Tell the user what GPU was detected, then ask:
+Tell the user what GPU was detected.
 
-**"Do you plan to use/test DRA? Should I install the operators needed?"**
-(GPU Operator, DRA Driver, NFD, cert-manager, feature gates)
+**DRA stack prompt (only when OCP >= 4.21):**
 
-- **Yes** -> proceed with GPU+DRA configuration (step 1h)
-- **No** -> bare cluster with GPU hardware, pass `--no-gpu` to skip GPU stack
+Parse the OCP version from step 1e. If the minor version is >= 21:
+
+**"Do you want to install the NVIDIA DRA stack? (GPU Operator, DRA Driver, NFD, cert-manager, feature gates)"**
+
+- **Yes** -> proceed with GPU+DRA configuration (step 1h), pass `--dra` to setup.sh
+- **No** -> bare cluster with GPU hardware, `--gpu <type>` without `--dra`
+
+**If OCP < 4.21:** Do NOT ask about DRA. The DRA stack requires OCP 4.21+ (K8s 1.34+, `resource.k8s.io/v1`). Just proceed with GPU hardware only (`--gpu <type>` without `--dra`).
 
 **If the user picked a non-GPU instance**: skip this step entirely, proceed to summary.
 
-### 1h. GPU+DRA Configuration (only if DRA stack requested)
+### 1h. GPU+DRA Configuration (only if DRA stack requested and OCP >= 4.21)
 
 Apply all GPU knowledge from the repo:
 
@@ -135,12 +140,13 @@ Ask: "These are the component versions that will be installed. Do you want to ch
 
 Present a summary:
 
-**For GPU+DRA clusters:**
+**For GPU+DRA clusters (OCP 4.21+ with --dra):**
 ```
 Cluster:       <name>
 Cloud:         <cloud>
 Instance:      <instance-type>
 GPU:           <gpu> (<count> GPU(s))
+DRA Stack:     yes
 MIG Mode:      <mode>
 Region:        <region>
 OCP Version:   <version>
@@ -154,7 +160,20 @@ Phases: quota check -> cluster creation -> feature gates -> cert-manager ->
         NFD -> GPU Operator -> DRA Driver [-> smoke test]
 ```
 
-**For non-GPU / bare clusters:**
+**For GPU-only clusters (no DRA stack):**
+```
+Cluster:       <name>
+Cloud:         <cloud>
+Instance:      <instance-type>
+GPU:           <gpu> (<count> GPU(s))
+DRA Stack:     no (GPU hardware only)
+Region:        <region>
+OCP Version:   <version>
+
+Phases: quota check -> cluster creation
+```
+
+**For non-GPU clusters:**
 ```
 Cluster:       <name>
 Cloud:         <cloud>
@@ -197,7 +216,7 @@ Wait for confirmation before running the full setup.
 
 ## Step 2: Run Setup
 
-### Non-GPU / bare cluster:
+### Non-GPU cluster:
 ```bash
 bash bin/setup.sh \
   --cluster-name <name> \
@@ -210,14 +229,26 @@ bash bin/setup.sh \
   --openshift-install <path-if-provided>
 ```
 
-### GPU+DRA cluster:
+### GPU-only cluster (no DRA stack):
 ```bash
 bash bin/setup.sh \
   --cluster-name <name> \
   --cloud <cloud> \
   --region <region> \
-  --instance-type <type> \
   --gpu <gpu> \
+  --pull-secret <path> \
+  --ocp-version <version> \
+  --openshift-install <path-if-provided>
+```
+
+### GPU+DRA cluster (OCP 4.21+ required):
+```bash
+bash bin/setup.sh \
+  --cluster-name <name> \
+  --cloud <cloud> \
+  --region <region> \
+  --gpu <gpu> \
+  --dra \
   --pull-secret <path> \
   --ocp-version <version> \
   --openshift-install <path-if-provided> \
@@ -246,7 +277,7 @@ If any phase fails:
 | No ResourceSlice | DRA driver permissions | Verify SCC grants |
 | MIG mode "Not Supported" on A100 | Cloud VM GPU reset not supported | Automated: uses patched image + node reboot |
 
-3. Offer to resume from the failed phase using `--skip-to <phase>` (GPU clusters only)
+3. Offer to resume from the failed phase using `--skip-to <phase>` (DRA clusters only — `--skip-to` a DRA phase implies `--dra`)
 
 ## Interaction Pattern
 

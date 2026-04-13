@@ -127,11 +127,11 @@ get_mig_mode() {
 get_zone_priority() {
     local cloud="$1" gpu="${2:-none}"
     case "${cloud}-${gpu}" in
-        gcp-t4)   echo "us-central1-a us-central1-b us-central1-c us-east1-b us-east1-c us-east1-d" ;;
-        gcp-l4)   echo "us-central1-a us-central1-b us-central1-c us-east1-b us-east1-c us-east1-d us-west1-a us-west1-b us-west1-c" ;;
-        gcp-a100) echo "us-central1-f us-central1-a us-central1-b us-central1-c us-west1-b us-east1-b" ;;
-        gcp-h100) echo "us-central1-a us-central1-b us-central1-c europe-west1-b europe-west1-c us-west1-a" ;;
-        gcp-none) echo "us-central1-a us-central1-b us-central1-c" ;;
+        gcp-t4)   echo "us-east1-b us-east1-c us-east1-d us-central1-a us-central1-b us-central1-c" ;;
+        gcp-l4)   echo "us-east1-b us-east1-c us-east1-d us-central1-a us-central1-b us-central1-c us-west1-a us-west1-b us-west1-c" ;;
+        gcp-a100) echo "us-central1-f us-central1-a us-central1-b us-central1-c us-east1-b us-east1-c us-east1-d" ;;
+        gcp-h100) echo "us-east1-b us-east1-c us-east1-d us-central1-a us-central1-b us-central1-c" ;;
+        gcp-none) echo "us-east1-b us-east1-c us-east1-d" ;;
         aws-t4)   echo "ap-south-1a ap-south-1b ap-south-1c us-east-1a us-east-1b us-east-1c" ;;
         aws-a100) echo "ap-south-1a ap-south-1b ap-south-1c us-east-1a us-east-1b us-east-1c" ;;
         aws-h100) echo "ap-south-1a ap-south-1b ap-south-1c us-east-1a us-east-1b us-east-1c" ;;

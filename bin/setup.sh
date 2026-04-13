@@ -33,11 +33,16 @@ Instance type (at least one of --gpu or --instance-type required):
                            GPU auto-detected from instance family when --gpu omitted
   --no-gpu                 Skip GPU stack even on GPU-capable instances
 
+GPU/DRA stack (requires OCP 4.21+):
+  --dra                    Install NVIDIA DRA stack (feature gates, cert-manager,
+                           NFD, GPU Operator, DRA Driver). Requires --gpu and OCP 4.21+.
+  --mig-mode MODE          MIG mode: timeslicing, dynamicmig (default: timeslicing)
+                           Ignored for non-MIG GPUs (T4, L4). Requires --dra.
+  --smoke-test             Run smoke test after DRA stack setup. Requires --dra.
+
 Optional:
   --ocp-version VERSION    OpenShift version (default: 4.21.0)
   --openshift-install PATH Path to openshift-install binary (auto-downloaded if not found)
-  --mig-mode MODE          MIG mode: timeslicing, dynamicmig (default: timeslicing)
-                           Ignored for non-MIG GPUs (T4, L4)
   --region REGION          Cloud region (auto-selected if not specified)
   --worker-zone ZONE       Worker node zone (auto-selected if not specified)
   --ssh-key PATH           SSH public key path (default: ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub)
@@ -47,23 +52,22 @@ Optional:
   --nfd-version VERSION    NFD chart version (default: 0.17.3)
   --gpu-operator-version V GPU Operator chart version (default: v25.10.1)
   --dra-driver-version V   DRA Driver chart version (default: 25.12.0)
-  --smoke-test             Run smoke test after setup
   -h, --help               Show this help
 
 Examples:
   # General-purpose cluster (no GPU)
   $(basename "$0") --cluster-name my-cluster --cloud aws --pull-secret ~/.pull-secret.json --instance-type m6i.xlarge
 
-  # T4 on AWS (GPU auto-detected from instance type)
-  $(basename "$0") --cluster-name my-test --cloud aws --pull-secret ~/.pull-secret.json --instance-type g4dn.xlarge
-
-  # T4 on AWS (explicit GPU flag, instance type auto-resolved)
+  # T4 on AWS — GPU hardware only, no DRA stack
   $(basename "$0") --cluster-name my-test --cloud aws --gpu t4 --pull-secret ~/.pull-secret.json
 
-  # A100 on GCP with DynamicMIG
-  $(basename "$0") --cluster-name mig-test --cloud gcp --gpu a100 --pull-secret ~/.pull-secret.json --mig-mode dynamicmig
+  # T4 on AWS with full DRA stack (OCP 4.21+ required)
+  $(basename "$0") --cluster-name my-test --cloud aws --gpu t4 --dra --pull-secret ~/.pull-secret.json
 
-  # GPU instance without GPU stack (e.g. manual GPU setup later)
+  # A100 on GCP with DRA stack and DynamicMIG
+  $(basename "$0") --cluster-name mig-test --cloud gcp --gpu a100 --dra --pull-secret ~/.pull-secret.json --mig-mode dynamicmig
+
+  # GPU-capable instance without GPU (e.g. manual GPU setup later)
   $(basename "$0") --cluster-name bare-gpu --cloud aws --pull-secret ~/.pull-secret.json --instance-type g4dn.xlarge --no-gpu
 EOF
 }
@@ -74,6 +78,7 @@ CLOUD=""
 GPU=""
 INSTANCE_TYPE=""
 NO_GPU=false
+DRA=false
 PULL_SECRET=""
 MIG_MODE="timeslicing"
 REGION=""
@@ -92,6 +97,7 @@ while [[ $# -gt 0 ]]; do
         --gpu) GPU="$2"; shift 2 ;;
         --instance-type) INSTANCE_TYPE="$2"; shift 2 ;;
         --no-gpu) NO_GPU=true; shift ;;
+        --dra) DRA=true; shift ;;
         --pull-secret) PULL_SECRET="$2"; shift 2 ;;
         --ocp-version) OCP_VERSION="$2"; shift 2 ;;
         --openshift-install) OPENSHIFT_INSTALL="$2"; shift 2 ;;
@@ -162,6 +168,12 @@ if [[ "$NO_GPU" == "true" && -n "$GPU" ]]; then
     exit 1
 fi
 
+# --dra + --no-gpu conflict
+if [[ "$DRA" == "true" && "$NO_GPU" == "true" ]]; then
+    log_error "Cannot use both --dra and --no-gpu"
+    exit 1
+fi
+
 # Resolve GPU and instance type
 if [[ "$NO_GPU" == "true" ]]; then
     # Explicit no-GPU: use provided instance type or default
@@ -227,19 +239,49 @@ fi
 # GPU enabled helper
 has_gpu() { [[ "$GPU" != "none" ]]; }
 
-# Validate --skip-to with no GPU
-if [[ -n "$SKIP_TO" ]] && ! has_gpu; then
+# DRA stack helper
+has_dra() { [[ "$DRA" == "true" ]]; }
+
+# --dra requires GPU
+if has_dra && ! has_gpu; then
+    log_error "--dra requires a GPU (use --gpu or a GPU-capable --instance-type)"
+    exit 1
+fi
+
+# --dra requires OCP 4.21+
+if has_dra; then
+    ocp_minor="${OCP_VERSION#4.}"
+    ocp_minor="${ocp_minor%%.*}"
+    if (( ocp_minor < 21 )); then
+        log_error "DRA stack requires OCP 4.21+ (K8s 1.34+). Selected version: ${OCP_VERSION}"
+        log_error "Remove --dra to provision the cluster with GPU hardware only."
+        exit 1
+    fi
+fi
+
+# --skip-to a DRA phase implies --dra
+if [[ -n "$SKIP_TO" ]]; then
     case "$SKIP_TO" in
         feature-gates|cert-manager|nfd|gpu-operator|dra-driver|smoke-test)
-            log_error "Cannot --skip-to ${SKIP_TO}: no GPU selected"
-            exit 1
+            if ! has_gpu; then
+                log_error "Cannot --skip-to ${SKIP_TO}: no GPU selected"
+                exit 1
+            fi
+            DRA=true
+            # Re-check OCP version for implied --dra
+            ocp_minor="${OCP_VERSION#4.}"
+            ocp_minor="${ocp_minor%%.*}"
+            if (( ocp_minor < 21 )); then
+                log_error "DRA stack requires OCP 4.21+ (K8s 1.34+). Selected version: ${OCP_VERSION}"
+                exit 1
+            fi
             ;;
     esac
 fi
 
-# Warn about --smoke-test with no GPU
-if [[ "$SMOKE_TEST" == "true" ]] && ! has_gpu; then
-    log_warn "--smoke-test ignored: no GPU selected (smoke test checks GPU resources)"
+# --smoke-test requires --dra
+if [[ "$SMOKE_TEST" == "true" ]] && ! has_dra; then
+    log_warn "--smoke-test ignored: DRA stack not selected (smoke test checks DRA resources)"
     SMOKE_TEST=false
 fi
 
@@ -279,8 +321,8 @@ fi
 # Resolve openshift-install binary
 resolve_openshift_install "$OCP_VERSION"
 
-# Auto-gate MIG mode (only when GPU is selected)
-if has_gpu; then
+# Auto-gate MIG mode (only when DRA stack is selected)
+if has_dra; then
     MIG_MODE=$(get_mig_mode "$GPU" "$MIG_MODE")
 fi
 
@@ -292,7 +334,12 @@ echo "  Cluster:       ${CLUSTER_NAME}"
 echo "  Cloud:         ${CLOUD}"
 if has_gpu; then
     echo "  GPU:           ${GPU} (${INSTANCE_TYPE})"
-    echo "  MIG Mode:      ${MIG_MODE}"
+    if has_dra; then
+        echo "  DRA Stack:     yes"
+        echo "  MIG Mode:      ${MIG_MODE}"
+    else
+        echo "  DRA Stack:     no (GPU hardware only)"
+    fi
 else
     echo "  GPU:           none"
     echo "  Instance Type: ${INSTANCE_TYPE}"
@@ -305,7 +352,7 @@ echo "  OCP Version:   ${OCP_VERSION}"
 echo "  Installer:     ${OPENSHIFT_INSTALL}"
 echo "  Install Dir:   ${INSTALL_DIR}"
 echo ""
-if has_gpu; then
+if has_dra; then
     echo "  Component Versions:"
     echo "    NFD:            ${NFD_CHART_VERSION}"
     echo "    GPU Operator:   ${GPU_OPERATOR_CHART_VERSION}"
@@ -327,7 +374,7 @@ fi
 # ============================================================
 # Phase execution with skip-to support
 # ============================================================
-if has_gpu; then
+if has_dra; then
     PHASES=("cluster" "feature-gates" "cert-manager" "nfd" "gpu-operator" "dra-driver" "smoke-test")
 else
     PHASES=("cluster")
@@ -369,8 +416,8 @@ if should_run_phase "cluster"; then
     create_cluster "$CLOUD" "$CLUSTER_NAME" "$GPU" "$REGION" "$WORKER_ZONE" "$PULL_SECRET" "$SSH_KEY" "$INSTALL_DIR" "$INSTANCE_TYPE"
 fi
 
-# GPU-only phases
-if has_gpu; then
+# DRA stack phases (only when --dra is active)
+if has_dra; then
     if should_run_phase "feature-gates"; then
         enable_dra_feature_gates "$MIG_MODE"
     fi
@@ -394,8 +441,10 @@ if has_gpu; then
     if should_run_phase "smoke-test"; then
         run_smoke_test "$MIG_MODE"
     fi
+elif has_gpu; then
+    log_info "GPU hardware selected without --dra — skipping DRA stack phases"
 else
-    log_info "No GPU selected — skipping GPU stack phases"
+    log_info "No GPU selected — skipping DRA stack phases"
 fi
 
 log_phase "Setup Complete!"
@@ -404,7 +453,11 @@ echo ""
 echo "  Next steps:"
 echo "    export KUBECONFIG=${KUBECONFIG:-${INSTALL_DIR}/auth/kubeconfig}"
 echo "    oc get nodes"
-if has_gpu; then
+if has_dra; then
     echo "    oc get deviceclass"
     echo "    oc get resourceslice"
+elif has_gpu; then
+    echo ""
+    echo "  GPU hardware is provisioned. To install the DRA stack, re-run with:"
+    echo "    $(basename "$0") --cluster-name ${CLUSTER_NAME} --cloud ${CLOUD} --gpu ${GPU} --dra --skip-cluster --install-dir ${INSTALL_DIR}"
 fi

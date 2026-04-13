@@ -15,9 +15,20 @@ Claude Code workspace for setting up OpenShift clusters, optionally with NVIDIA 
 
 The `/setup` command supports creating general-purpose clusters without GPU:
 - Asks for cloud provider first, then queries available machine types
-- User picks an instance type, then chooses whether to install the GPU/DRA stack
+- User picks an instance type; GPU-specific phases are skipped
 - Worker instance type set via `--instance-type` (defaults: `n2-standard-4` on GCP, `m6i.xlarge` on AWS)
-- GPU-specific phases are skipped (feature gates, cert-manager, NFD, GPU Operator, DRA Driver, smoke test)
+
+### GPU Without DRA Stack
+
+`--gpu <type>` provisions GPU hardware (correct instance type, MachineSet patching, `onHostMaintenance` settings) but does **not** install the DRA stack by default. The DRA stack is opt-in via `--dra`.
+
+### DRA Stack (requires OCP 4.21+)
+
+`--dra` installs the full NVIDIA DRA stack on top of GPU hardware: feature gates, cert-manager, NFD, GPU Operator, DRA Driver. Requires:
+- A GPU (`--gpu` or GPU-capable `--instance-type`)
+- OCP 4.21+ (K8s 1.34+) — the DRA stack uses `resource.k8s.io/v1` and feature gates that only exist in K8s 1.34+
+
+The `/setup` skill automatically asks whether to install the DRA stack when GPU is selected and OCP version is 4.21+.
 
 ## GPU Instance Matrix
 
@@ -48,16 +59,19 @@ When H100 is requested and GCP quota check fails:
 
 ## Setup Phases (in order)
 
-> **Note:** When no GPU is specified (`--no-gpu` or non-GPU `--instance-type`), only phases 1-2 run. Phases 3-8 are GPU-specific and are skipped automatically.
+> **Phase behavior by flag:**
+> - `--gpu` only: phases 1-2 run (cluster with GPU hardware)
+> - `--gpu --dra`: all phases run (cluster + full DRA stack, requires OCP 4.21+)
+> - No GPU: phase 1-2 only (general-purpose cluster)
 
 1. **Quota check** — verify cloud has enough GPU/CPU quota (credential-only check when no GPU)
 2. **Cluster creation** — openshift-install with zone fallback on stockout
-3. **Feature gates** — enable DRA feature gates, wait for MCP rollout *(GPU only)*
-4. **cert-manager** — install cert-manager operator *(GPU only)*
-5. **NFD** — Node Feature Discovery + manual GPU labeling *(GPU only)*
-6. **GPU Operator** — NVIDIA GPU Operator with DRA enabled, device plugin DISABLED *(GPU only)*
-7. **DRA Driver** — NVIDIA DRA Driver (MIG mode auto-gated by GPU type) *(GPU only)*
-8. **Smoke test** — submit GPU job, verify GPU access via DRA *(GPU only)*
+3. **Feature gates** — enable DRA feature gates, wait for MCP rollout *(`--dra` only)*
+4. **cert-manager** — install cert-manager operator *(`--dra` only)*
+5. **NFD** — Node Feature Discovery + manual GPU labeling *(`--dra` only)*
+6. **GPU Operator** — NVIDIA GPU Operator with DRA enabled, device plugin DISABLED *(`--dra` only)*
+7. **DRA Driver** — NVIDIA DRA Driver (MIG mode auto-gated by GPU type) *(`--dra` only)*
+8. **Smoke test** — submit GPU job, verify GPU access via DRA *(`--dra` only)*
 
 Each phase has active monitoring: polls until success or timeout, surfaces pod logs/events on failure.
 
