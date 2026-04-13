@@ -186,7 +186,7 @@ AWS_CONTROL_PLANE_TYPE="${AWS_CONTROL_PLANE_TYPE:-m6i.xlarge}"
 # ============================================================
 OCP_VERSION="${OCP_VERSION:-4.21.0}"
 OPENSHIFT_INSTALL="${OPENSHIFT_INSTALL:-}"
-REPO_ROOT="$(cd "${SCRIPT_DIR}" && git rev-parse --show-toplevel 2>/dev/null || cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}" && git rev-parse --show-toplevel 2>/dev/null || (cd "${SCRIPT_DIR}/../.." && pwd))"
 TOOLS_DIR="${REPO_ROOT}/bin/tools"
 
 # Resolve openshift-install binary: user-provided path > bin/tools/ > PATH > download
