@@ -151,7 +151,10 @@ monitor_worker_provisioning() {
 
     read -ra zone_array <<< "$zones"
 
-    log_info "Monitoring worker provisioning (zones: ${zones})"
+    # Double the zone list so we try all zones twice before giving up
+    local double_zones=("${zone_array[@]}" "${zone_array[@]}")
+
+    log_info "Monitoring worker provisioning (zones: ${zones}, 2 passes)"
     local elapsed=0 poll_interval=15
     while (( elapsed < timeout )); do
         # Check if any worker node is Ready
@@ -162,7 +165,7 @@ monitor_worker_provisioning() {
             return 0
         fi
 
-        # Check for failed worker machines (capacity errors)
+        # Check for failed worker machines
         local failed_machines
         failed_machines=$(oc get machines.machine.openshift.io -n openshift-machine-api \
                 -o json 2>/dev/null | python3 -c "
@@ -175,45 +178,35 @@ for m in data.get('items', []):
     phase = m.get('status', {}).get('phase', '')
     if phase == 'Failed':
         conditions = m.get('status', {}).get('conditions', [])
-        for c in conditions:
-            msg = c.get('message', '').lower()
-            if 'insufficient' in msg or 'capacity' in msg or 'zone_resource_pool' in msg:
-                print(f'{name}|capacity')
-                break
+        msg = ' '.join(c.get('message', '') for c in conditions).lower()
+        if any(k in msg for k in ['insufficient', 'capacity', 'zone_resource_pool', 'instance not found', 'instancemissing', \"can't find created instance\"]):
+            print(f'{name}|recoverable')
+        else:
+            print(f'{name}|fatal')
 " 2>/dev/null || true)
 
         if [[ -n "$failed_machines" ]]; then
-            if echo "$failed_machines" | grep -q "capacity"; then
+            if echo "$failed_machines" | grep -q "recoverable"; then
                 current_zone_idx=$(( current_zone_idx + 1 ))
-                if (( current_zone_idx >= ${#zone_array[@]} )); then
-                    log_error "All zones exhausted for $gpu."
+                if (( current_zone_idx >= ${#double_zones[@]} )); then
+                    log_error "All zones tried twice for $gpu."
                     return 1
                 fi
-                local new_zone="${zone_array[$current_zone_idx]}"
-                log_warn "Capacity error detected. Trying zone: ${new_zone}"
+                local new_zone="${double_zones[$current_zone_idx]}"
+                log_warn "Worker failed. Trying zone: ${new_zone} (attempt $(( current_zone_idx + 1 ))/${#double_zones[@]})"
 
                 local machineset
                 machineset=$(oc get machinesets.machine.openshift.io -n openshift-machine-api \
                                 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
                 if [[ -n "$machineset" ]]; then
-                    # Delete only failed worker machines
-                    oc get machines.machine.openshift.io -n openshift-machine-api \
-                                        -o name 2>/dev/null | grep worker | while read -r m; do
-                        local phase
-                        phase=$(oc get "$m" -n openshift-machine-api -o jsonpath='{.status.phase}' 2>/dev/null || true)
-                        if [[ "$phase" == "Failed" ]]; then
-                            oc delete "$m" -n openshift-machine-api 2>/dev/null || true
-                        fi
-                    done
+                    delete_failed_worker_machines
 
-                    # Patch MachineSet with new zone
                     if [[ "$cloud" == "aws" ]]; then
                         local new_region
                         new_region=$(get_region_from_zone "$cloud" "$new_zone")
                         oc patch machineset.machine.openshift.io "$machineset" -n openshift-machine-api --type=merge \
                             -p "{\"spec\":{\"template\":{\"spec\":{\"providerSpec\":{\"value\":{\"placement\":{\"availabilityZone\":\"${new_zone}\",\"region\":\"${new_region}\"}}}}}}}}" 2>/dev/null || true
-                        # Patch subnet filter to match new zone (required per CLAUDE.md workaround #6)
                         local cluster_infra_id
                         cluster_infra_id=$(oc get infrastructure cluster -o jsonpath='{.status.infrastructureName}' 2>/dev/null)
                         if [[ -n "$cluster_infra_id" ]]; then
@@ -225,6 +218,11 @@ for m in data.get('items', []):
                             -p "{\"spec\":{\"template\":{\"spec\":{\"providerSpec\":{\"value\":{\"zone\":\"${new_zone}\"}}}}}}" 2>/dev/null || true
                     fi
                 fi
+            elif echo "$failed_machines" | grep -q "fatal"; then
+                local fail_msg
+                fail_msg=$(echo "$failed_machines" | head -1)
+                log_error "Worker failed with non-recoverable error. Check machine status in openshift-machine-api."
+                return 1
             fi
         fi
 

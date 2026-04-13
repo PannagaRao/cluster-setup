@@ -140,6 +140,7 @@ These are hard-won lessons — do not remove without understanding why they exis
 |-------|-------|-----|
 | Cluster create auth failure | Stale pull secret | Refresh at console.redhat.com |
 | No worker node after 20 min | GPU stockout in zone | Auto zone fallback handles this; if all zones fail, try different region |
+| Instance not found on provider | GCP instance vanished after creation | Auto retry in same zone (up to 3x), then zone fallback |
 | InsufficientInstanceCapacity | Regional capacity exhausted | Destroy cluster (`/teardown`) and recreate in different region |
 | Cluster initialization timeout | No worker nodes available | Wait for worker to join; check machine status if stuck >5min |
 | MCP Degraded | Feature gate conflict | Check `oc describe mcp`, may need to patch feature gates |

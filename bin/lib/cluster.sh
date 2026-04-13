@@ -215,6 +215,18 @@ create_cluster() {
     oc get nodes
 }
 
+# Delete failed worker machines (used by zone fallback and transient retry)
+delete_failed_worker_machines() {
+    oc get machines.machine.openshift.io -n openshift-machine-api -o name 2>/dev/null \
+        | grep worker | while read -r m; do
+        local phase
+        phase=$(oc get "$m" -n openshift-machine-api -o jsonpath='{.status.phase}' 2>/dev/null || true)
+        if [[ "$phase" == "Failed" ]]; then
+            oc delete "$m" -n openshift-machine-api 2>/dev/null || true
+        fi
+    done
+}
+
 # Patch worker MachineSet to add GPU accelerator
 # Required for GCP T4: install-config accelerator field is ignored by the installer
 # Includes zone fallback: if machine fails with capacity error, tries next zone
@@ -304,7 +316,9 @@ patch_machineset_gpu_accelerator() {
     fi
     read -ra zone_array <<< "$zones"
 
-    # Monitor with zone fallback
+    # Monitor with zone fallback — try all zones twice before giving up
+    # Zone list is doubled: [b, c, d, b, c, d] so we cycle through twice
+    local double_zones=("${zone_array[@]}" "${zone_array[@]}")
     elapsed=0
     local timeout=1200
     local poll_interval=15
@@ -317,7 +331,7 @@ patch_machineset_gpu_accelerator() {
             return 0
         fi
 
-        # Check for failed worker machines (capacity errors)
+        # Check for failed worker machines
         local failed_phase
         failed_phase=$(oc get machines.machine.openshift.io -n openshift-machine-api \
             -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{"\n"}{end}' 2>/dev/null \
@@ -336,34 +350,24 @@ for m in data.get('items', []):
         break
 " 2>/dev/null || true)
 
-            if echo "$fail_msg" | grep -qi -e "capacity" -e "exhausted" -e "ZONE_RESOURCE_POOL"; then
+            # Zone fallback on capacity or instance-not-found errors
+            if echo "$fail_msg" | grep -qi -e "capacity" -e "exhausted" -e "ZONE_RESOURCE_POOL" -e "Instance not found" -e "InstanceMissing" -e "can't find created instance"; then
                 current_zone_idx=$(( current_zone_idx + 1 ))
-                if (( current_zone_idx >= ${#zone_array[@]} )); then
-                    log_error "All zones exhausted for ${gpu} GPU in ${region:-all regions}"
+                if (( current_zone_idx >= ${#double_zones[@]} )); then
+                    log_error "All zones tried twice for ${gpu} GPU in ${region:-all regions}"
                     return 1
                 fi
-                local new_zone="${zone_array[$current_zone_idx]}"
-                log_warn "Capacity error in current zone. Trying zone: ${new_zone}"
+                local new_zone="${double_zones[$current_zone_idx]}"
+                log_warn "Worker failed: ${fail_msg}"
+                log_warn "Trying zone: ${new_zone} (attempt $(( current_zone_idx + 1 ))/${#double_zones[@]})"
 
-                # Delete only failed worker machines
-                oc get machines.machine.openshift.io -n openshift-machine-api -o name 2>/dev/null \
-                    | grep worker | while read -r m; do
-                    local phase
-                    phase=$(oc get "$m" -n openshift-machine-api -o jsonpath='{.status.phase}' 2>/dev/null || true)
-                    if [[ "$phase" == "Failed" ]]; then
-                        oc delete "$m" -n openshift-machine-api 2>/dev/null || true
-                    fi
-                done
-
-                # Patch MachineSet to new zone (GCP path)
+                delete_failed_worker_machines
                 oc patch machineset.machine.openshift.io "$machineset" -n openshift-machine-api --type=merge \
                     -p "{\"spec\":{\"template\":{\"spec\":{\"providerSpec\":{\"value\":{\"zone\":\"${new_zone}\"}}}}}}" 2>/dev/null || true
-
-                # Scale back up in new zone
                 oc scale machineset.machine.openshift.io "$machineset" -n openshift-machine-api --replicas=1
                 log_info "MachineSet patched to zone ${new_zone}, waiting for worker..."
             else
-                log_error "Machine failed (non-capacity): ${fail_msg}"
+                log_error "Machine failed: ${fail_msg}"
                 return 1
             fi
         fi
