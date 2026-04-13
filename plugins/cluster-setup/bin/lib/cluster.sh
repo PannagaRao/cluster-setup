@@ -176,15 +176,25 @@ create_cluster() {
     fi
 
     # Start worker monitoring in parallel with installer
-    # This detects ZONE_RESOURCE_POOL_EXHAUSTED and does zone fallback
+    # Wait for control plane to be Ready first — on AWS CAPI, infrastructure
+    # creation happens after kubeconfig appears so workers don't exist yet.
+    # On GCP IPI this resolves almost immediately.
     log_phase "Monitoring Worker Provisioning (parallel with installer)"
-    if [[ "$gpu" != "none" ]]; then
-        monitor_worker_provisioning "$cloud" "$gpu" 1800 "$region" &
-        monitor_pid=$!
-    else
-        wait_for_nodes_ready 1800 1 &
-        monitor_pid=$!
-    fi
+    {
+        log_info "Waiting for control plane nodes to be Ready..."
+        while ! oc get nodes -l 'node-role.kubernetes.io/control-plane' --no-headers 2>/dev/null | grep -q " Ready" && \
+              ! oc get nodes -l 'node-role.kubernetes.io/master' --no-headers 2>/dev/null | grep -q " Ready"; do
+            sleep 15
+        done
+        log_success "Control plane is Ready, monitoring worker provisioning"
+
+        if [[ "$gpu" != "none" ]]; then
+            monitor_worker_provisioning "$cloud" "$gpu" 1800 "$region"
+        else
+            wait_for_nodes_ready 1800 1
+        fi
+    } &
+    monitor_pid=$!
 
     # Wait for installer to finish
     local install_rc=0
