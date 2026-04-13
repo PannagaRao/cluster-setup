@@ -110,7 +110,7 @@ activate_mig_cloud_vm() {
     # Find the GPU operator driver daemonset pod
     local driver_pod
     driver_pod=$(oc get pods -n nvidia-gpu-operator --no-headers 2>/dev/null \
-        | grep "nvidia-driver-daemonset" | awk '{print $1}' | head -1)
+        | grep "nvidia-driver-daemonset" | awk '{print $1}' | head -1 || true)
 
     if [[ -z "$driver_pod" ]]; then
         log_error "No nvidia-driver-daemonset pod found in nvidia-gpu-operator namespace"
@@ -195,7 +195,7 @@ activate_mig_cloud_vm() {
         elapsed=0
         while (( elapsed < 900 )); do
             new_driver_pod=$(oc get pods -n nvidia-gpu-operator --no-headers 2>/dev/null \
-                | grep "nvidia-driver-daemonset" | grep -E "2/2\s+Running" | awk '{print $1}' | head -1)
+                | grep "nvidia-driver-daemonset" | grep -E "2/2\s+Running" | awk '{print $1}' | head -1 || true)
             if [[ -n "$new_driver_pod" ]]; then
                 # Verify we can actually exec into it (confirms it's not a stale pod)
                 if oc exec -n nvidia-gpu-operator "$new_driver_pod" -- nvidia-smi --query-gpu=name --format=csv,noheader &>/dev/null; then
