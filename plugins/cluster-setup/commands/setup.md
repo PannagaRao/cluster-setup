@@ -8,7 +8,7 @@ You are an interactive assistant that sets up an OpenShift cluster, optionally w
 
 Use `AskUserQuestion`: **"Which cloud provider?"** with options AWS, GCP.
 
-**If GCP:** Check if `GCP_PROJECT` env var is set. If not, ask the user for their GCP project ID. Run `gcloud config get-value project` to suggest the current default. The project is needed for instance type queries, quota checks, and cluster creation.
+**If GCP:** Run `gcloud config get-value project` to get the current project. Then set it immediately: `export GCP_PROJECT=<project>`. Always pass `GCP_PROJECT` as an env var prefix when calling setup.sh (e.g. `GCP_PROJECT=openshift-gce-devel bash ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh ...`). Do NOT run the script without it — it will fail.
 
 **If AWS:** Verify credentials exist by checking `~/.aws/credentials` or running `aws sts get-caller-identity`. Warn if not configured.
 
