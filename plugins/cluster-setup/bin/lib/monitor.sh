@@ -186,14 +186,16 @@ for m in data.get('items', []):
             print(f'{name}|recoverable')
         else:
             print(f'{name}|fatal')
-    elif phase == 'Provisioning':
-        # Detect stuck provisioning (>10 min without becoming Provisioned/Running)
+    elif phase in ('Provisioning', 'Provisioned', ''):
+        # After 5 min, check if the instance was actually created (has providerID).
+        # If not, it's stuck — likely zone/capacity issue.
         created = m.get('metadata', {}).get('creationTimestamp', '')
+        provider_id = m.get('spec', {}).get('providerID', '') or ''
         if created:
             try:
                 ct = datetime.datetime.fromisoformat(created.replace('Z', '+00:00'))
                 age_min = (datetime.datetime.now(datetime.timezone.utc) - ct).total_seconds() / 60
-                if age_min > 10:
+                if age_min > 5 and not provider_id:
                     print(f'{name}|recoverable')
             except:
                 pass
