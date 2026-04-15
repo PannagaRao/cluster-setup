@@ -24,7 +24,11 @@ Ask for a short cluster name (e.g. `my-cluster`, `gpu-test`).
 
 ### 1d. Pull Secret
 
-Ask for the path to their pull-secret.json file.
+Ask for the path to their pull secret file. Both formats are supported — do NOT ask the user to convert or modify their file:
+- Raw JSON: `{"auths":{"cloud.openshift.com":...}}`
+- YAML format: `pullSecret: '{"auths":...}'`
+
+The setup script auto-detects the format.
 
 ### 1e. OCP Version and Installer
 
