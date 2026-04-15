@@ -268,7 +268,10 @@ bash ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh \
   --smoke-test
 ```
 
-Monitor the output. After each phase completes, briefly report status to the user.
+**IMPORTANT:** Cluster creation takes 30-60 minutes. Run in the foreground by default. If the user asks to run in the background, use `timeout 90m` and ask how often to check progress (default 10 min). Periodically tail the install log and report phase transitions:
+```bash
+tail -5 /tmp/ocp-<cluster-name>/install.log 2>/dev/null
+```
 
 ## Step 3: Handle Failures
 
