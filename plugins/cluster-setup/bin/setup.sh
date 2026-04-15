@@ -349,16 +349,15 @@ fi
 log_phase "Cluster Setup Summary"
 echo "  Cluster:       ${CLUSTER_NAME}"
 echo "  Cloud:         ${CLOUD}"
-if has_gpu; then
+if has_dra; then
     echo "  GPU:           ${GPU} (${INSTANCE_TYPE})"
-    if has_dra; then
-        echo "  DRA Stack:     yes"
-        echo "  MIG Mode:      ${MIG_MODE}"
-    else
-        echo "  DRA Stack:     no (GPU hardware only)"
+    echo "  DRA Stack:     yes"
+    if [[ "$MIG_MODE" == "dynamicmig" ]]; then
+        echo "  DynamicMIG:    yes"
     fi
+elif has_gpu; then
+    echo "  GPU:           ${GPU} (${INSTANCE_TYPE})"
 else
-    echo "  GPU:           none"
     echo "  Instance Type: ${INSTANCE_TYPE}"
 fi
 echo "  Region:        ${REGION}"
@@ -459,9 +458,7 @@ if has_dra; then
         run_smoke_test "$MIG_MODE"
     fi
 elif has_gpu; then
-    log_info "GPU hardware selected without --dra — skipping DRA stack phases"
-else
-    log_info "No GPU selected — skipping DRA stack phases"
+    log_info "GPU hardware provisioned — DRA stack not selected"
 fi
 
 log_phase "Setup Complete!"
