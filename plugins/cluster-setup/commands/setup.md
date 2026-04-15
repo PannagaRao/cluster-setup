@@ -210,7 +210,9 @@ Then display the **raw YAML** to the user — do NOT summarize or paraphrase it,
 cat /tmp/ocp-<cluster-name>/install-config.yaml
 ```
 
-Show the complete YAML output in a code block. Then ask: **"Here is the install-config that will be used. Does this look correct? Should I proceed?"**
+Show the complete YAML output in a code block. Then ask: **"Here is the install-config that will be used. Does this look correct, or do you want any changes?"**
+
+If the user requests changes, edit the YAML file directly at `/tmp/ocp-<cluster-name>/install-config.yaml`. The setup script will detect the existing file and use it as-is instead of regenerating.
 
 Wait for confirmation before running the full setup.
 

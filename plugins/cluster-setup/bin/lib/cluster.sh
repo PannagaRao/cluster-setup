@@ -120,16 +120,22 @@ create_cluster() {
         log_success "AWS credentials found"
     fi
 
-    # Clean install dir (openshift-install needs a clean dir)
-    rm -rf "${install_dir}"
-    mkdir -p "${install_dir}"
+    # If install-config.yaml already exists, use it (user may have edited it)
+    if [[ -f "${install_dir}/install-config.yaml" ]]; then
+        log_info "Using existing install-config.yaml in ${install_dir}"
+        cp "${install_dir}/install-config.yaml" "${install_dir}/install-config.yaml.bak"
+    else
+        # Clean install dir (openshift-install needs a clean dir)
+        rm -rf "${install_dir}"
+        mkdir -p "${install_dir}"
 
-    # Generate install-config
-    generate_install_config "$cloud" "$cluster_name" "$gpu" "$region" "$worker_zone" \
-        "$pull_secret_path" "$ssh_key_path" "$install_dir" "$instance_type"
+        # Generate install-config
+        generate_install_config "$cloud" "$cluster_name" "$gpu" "$region" "$worker_zone" \
+            "$pull_secret_path" "$ssh_key_path" "$install_dir" "$instance_type"
 
-    # Keep a backup (openshift-install consumes the file)
-    cp "${install_dir}/install-config.yaml" "${install_dir}/install-config.yaml.bak"
+        # Keep a backup (openshift-install consumes the file)
+        cp "${install_dir}/install-config.yaml" "${install_dir}/install-config.yaml.bak"
+    fi
 
     # Destroy any previous cluster with same name
     destroy_cluster "$install_dir"
