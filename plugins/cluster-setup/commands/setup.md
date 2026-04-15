@@ -51,7 +51,7 @@ aws ec2 describe-instance-types \
 **GCP:**
 ```bash
 gcloud compute machine-types list \
-  --filter="zone:<region>-a AND (name:n2-standard-* OR name:e2-standard-* OR name:c2-standard-* OR name:g2-standard-* OR name:a2-* OR name:a3-* OR name:n1-standard-*)" \
+  --filter="zone:<region>-b AND (name:n2-standard-* OR name:e2-standard-* OR name:c2-standard-* OR name:g2-standard-* OR name:a2-* OR name:a3-* OR name:n1-standard-*)" \
   --format="table(name,zone,guestCpus,memoryMb)" \
   --sort-by=guestCpus
 ```
