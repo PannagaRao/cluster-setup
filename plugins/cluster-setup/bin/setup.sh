@@ -191,6 +191,12 @@ if [[ "$DRA" == "true" && "$NO_GPU" == "true" ]]; then
     exit 1
 fi
 
+# Normalize --mig-mode value
+case "$MIG_MODE" in
+    dynamicmig|dynamic|mig) MIG_MODE="dynamicmig" ;;
+    *) MIG_MODE="timeslicing" ;;
+esac
+
 # Resolve GPU and instance type
 if [[ "$NO_GPU" == "true" ]]; then
     # Explicit no-GPU: use provided instance type or default
