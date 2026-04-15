@@ -6,7 +6,7 @@ You are an interactive assistant that sets up an OpenShift cluster, optionally w
 
 ### 1a. Cloud Provider
 
-Ask the user: **"Which cloud provider?"** (`aws` or `gcp`)
+Use `AskUserQuestion`: **"Which cloud provider?"** with options AWS, GCP.
 
 **If GCP:** Check if `GCP_PROJECT` env var is set. If not, ask the user for their GCP project ID. Run `gcloud config get-value project` to suggest the current default. The project is needed for instance type queries, quota checks, and cluster creation.
 
@@ -14,7 +14,7 @@ Ask the user: **"Which cloud provider?"** (`aws` or `gcp`)
 
 ### 1b. Region
 
-Ask for region or offer a default:
+Use `AskUserQuestion` to offer a default region:
 - GCP default: `us-east1`
 - AWS default: `us-east-1`
 
@@ -71,7 +71,7 @@ If the cloud CLI command fails (e.g. not authenticated), fall back to presenting
 | AWS | m6i.xlarge | 4 | 16 GB |
 | GCP | n2-standard-4 | 4 | 16 GB |
 
-Present categorized (GPU vs general-purpose) and let the user pick.
+Use `AskUserQuestion` to present categorized options (GPU vs general-purpose) and let the user pick.
 
 ### 1g. GPU Detection and DRA Stack (only for GPU instances)
 
@@ -88,10 +88,9 @@ Tell the user what GPU was detected.
 
 Parse the OCP version from step 1e. If the minor version is >= 21:
 
-**"Do you want to install the NVIDIA DRA stack? (GPU Operator, DRA Driver, NFD, cert-manager, feature gates)"**
-
-- **Yes** -> proceed with GPU+DRA configuration (step 1h), pass `--dra` to setup.sh
-- **No** -> bare cluster with GPU hardware, `--gpu <type>` without `--dra`
+Use `AskUserQuestion`: **"Install the NVIDIA DRA stack?"** with options:
+- **Yes** — Feature gates, cert-manager, NFD, GPU Operator, DRA Driver → proceed to step 1h, pass `--dra`
+- **No** — GPU hardware only, no operators → skip to summary
 
 **If OCP < 4.21:** Do NOT ask about DRA. The DRA stack requires OCP 4.21+ (K8s 1.34+, `resource.k8s.io/v1`). Just proceed with GPU hardware only (`--gpu <type>` without `--dra`).
 
@@ -107,8 +106,11 @@ Apply all GPU knowledge from the repo:
 - L4 is GCP-only (g2-standard-8)
 
 **MIG mode** (only ask for A100 or H100):
-- Offer: `timeslicing` (default) or `dynamicmig`
-- T4/L4: automatically set to timeslicing (not MIG-capable), inform the user
+Use `AskUserQuestion`: "MIG mode?" with options:
+- **Timeslicing (Recommended)** — Default, no MIG partitioning
+- **DynamicMIG** — MIG partitioning (A100 needs workarounds)
+
+T4/L4: automatically set to timeslicing (not MIG-capable), inform the user.
 
 **A100 + DynamicMIG warning** (if selected):
 
@@ -125,9 +127,10 @@ Apply all GPU knowledge from the repo:
 > 1. **H100** -- supports GPU reset natively, DynamicMIG works without workarounds
 > 2. **A100 with timeslicing** -- no MIG partitioning, but avoids the GPU reset issue entirely
 >
-> Do you want to proceed with A100 + DynamicMIG (with workarounds), switch to H100, or use timeslicing instead?
-
-Wait for the user's choice before continuing.
+Use `AskUserQuestion`: "How to proceed?" with options:
+- **Proceed with A100 + DynamicMIG** — Workarounds applied automatically
+- **Switch to H100** — Native GPU reset, no workarounds
+- **Use timeslicing instead** — No MIG partitioning
 
 **Component versions** (from config.sh defaults, user can override):
 - NFD: 0.17.3 (`--nfd-version`)
