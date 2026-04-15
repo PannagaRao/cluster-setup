@@ -65,7 +65,7 @@ Optional:
   --ssh-key PATH           SSH public key path (default: ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub)
   --install-dir DIR        Directory for openshift-install artifacts (default: /tmp/ocp-<cluster-name>)
   --skip-cluster           Skip cluster creation (use existing cluster)
-  --skip-to PHASE          Skip to a specific phase (feature-gates, cert-manager, nfd, gpu-operator, dra-driver, smoke-test)
+  --skip-to PHASE          Skip to a specific phase (feature-gates, cert-manager, nfd, gpu-operator, dra-driver, mig-activate, smoke-test)
   --nfd-version VERSION    NFD chart version (default: 0.17.3)
   --gpu-operator-version V GPU Operator chart version (default: v25.10.1)
   --dra-driver-version V   DRA Driver chart version (default: 25.12.0)
@@ -285,7 +285,7 @@ fi
 # --skip-to a DRA phase implies --dra
 if [[ -n "$SKIP_TO" ]]; then
     case "$SKIP_TO" in
-        feature-gates|cert-manager|nfd|gpu-operator|dra-driver|smoke-test)
+        feature-gates|cert-manager|nfd|gpu-operator|dra-driver|mig-activate|smoke-test)
             if ! has_gpu; then
                 log_error "Cannot --skip-to ${SKIP_TO}: no GPU selected"
                 exit 1
@@ -397,7 +397,7 @@ fi
 # Phase execution with skip-to support
 # ============================================================
 if has_dra; then
-    PHASES=("cluster" "feature-gates" "cert-manager" "nfd" "gpu-operator" "dra-driver" "smoke-test")
+    PHASES=("cluster" "feature-gates" "cert-manager" "nfd" "gpu-operator" "dra-driver" "mig-activate" "smoke-test")
 else
     PHASES=("cluster")
 fi
@@ -458,6 +458,12 @@ if has_dra; then
 
     if should_run_phase "dra-driver"; then
         install_dra_driver "$GPU" "$MIG_MODE" "$CLOUD"
+    fi
+
+    if should_run_phase "mig-activate"; then
+        if [[ "$MIG_MODE" == "dynamicmig" && "$GPU" == "a100" && ("$CLOUD" == "gcp" || "$CLOUD" == "aws") ]]; then
+            activate_mig_cloud_vm
+        fi
     fi
 
     if should_run_phase "smoke-test"; then

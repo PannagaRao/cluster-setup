@@ -95,11 +95,6 @@ install_dra_driver() {
     log_info "ResourceSlices:"
     oc get resourceslice 2>/dev/null || true
 
-    # A100 on cloud VMs: enable MIG mode, reboot worker, deploy keepalive
-    local cloud="${3:-}"
-    if [[ "$mig_mode" == "dynamicmig" && "$gpu" == "a100" && -n "$cloud" && ("$cloud" == "gcp" || "$cloud" == "aws") ]]; then
-        activate_mig_cloud_vm
-    fi
 }
 
 # Activate MIG mode on A100 cloud VMs where GPU reset is not supported.
