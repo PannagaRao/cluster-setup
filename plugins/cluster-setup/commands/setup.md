@@ -105,12 +105,12 @@ Apply all GPU knowledge from the repo:
 - GCP H100: "H100 quota is likely not available on GCP. Consider using AWS p5.48xlarge instead"
 - L4 is GCP-only (g2-standard-8)
 
-**MIG mode** (only ask for A100 or H100):
-Use `AskUserQuestion`: "MIG mode?" with options:
-- **Timeslicing (Recommended)** — Default, no MIG partitioning
-- **DynamicMIG** — MIG partitioning (A100 needs workarounds)
+**DynamicMIG** (only ask for A100 or H100):
+Use `AskUserQuestion`: "Enable DynamicMIG?" with options:
+- **No (Recommended)** — Default
+- **Yes** — MIG partitioning (A100 needs workarounds)
 
-T4/L4: automatically set to timeslicing (not MIG-capable), inform the user.
+T4/L4: skip this question (not MIG-capable).
 
 **A100 + DynamicMIG warning** (if selected):
 

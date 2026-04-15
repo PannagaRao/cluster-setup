@@ -35,7 +35,7 @@ install_dra_driver() {
     if [[ "$mig_mode" == "dynamicmig" ]]; then
         values_file="${TEMPLATE_DIR}/helm-values-dynamicmig.yaml"
     else
-        values_file="${TEMPLATE_DIR}/helm-values-timeslicing.yaml"
+        values_file="${TEMPLATE_DIR}/helm-values-default.yaml"
     fi
 
     if [[ ! -f "$values_file" ]]; then
