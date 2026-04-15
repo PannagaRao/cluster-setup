@@ -117,10 +117,21 @@ activate_mig_cloud_vm() {
         return 1
     fi
 
+    # Wait for driver pod to be ready (may be restarting after feature gate MCP rollout)
+    log_info "Waiting for GPU driver pod to be ready..."
+    local drv_wait=0
+    while (( drv_wait < 300 )); do
+        if oc exec -n nvidia-gpu-operator "$driver_pod" -- nvidia-smi --query-gpu=name --format=csv,noheader &>/dev/null; then
+            break
+        fi
+        sleep 15
+        drv_wait=$(( drv_wait + 15 ))
+    done
+
     # Check current MIG mode
     local mig_status
     mig_status=$(oc exec -n nvidia-gpu-operator "$driver_pod" -- \
-        nvidia-smi --query-gpu=mig.mode.current,mig.mode.pending --format=csv,noheader 2>/dev/null)
+        nvidia-smi --query-gpu=mig.mode.current,mig.mode.pending --format=csv,noheader 2>/dev/null || echo "unknown")
     log_info "Current MIG status: ${mig_status}"
 
     local mig_current mig_pending
