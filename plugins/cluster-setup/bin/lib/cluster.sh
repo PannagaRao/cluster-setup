@@ -188,9 +188,15 @@ create_cluster() {
     log_phase "Monitoring Worker Provisioning (parallel with installer)"
     {
         log_info "Waiting for control plane nodes to be Ready..."
+        local cp_wait=0
         while ! oc get nodes -l 'node-role.kubernetes.io/control-plane' --no-headers 2>/dev/null | grep -q " Ready" && \
               ! oc get nodes -l 'node-role.kubernetes.io/master' --no-headers 2>/dev/null | grep -q " Ready"; do
             sleep 15
+            cp_wait=$(( cp_wait + 15 ))
+            if (( cp_wait >= 1200 )); then
+                log_error "Control plane did not become Ready within 20 minutes"
+                return 1
+            fi
         done
         log_success "Control plane is Ready, monitoring worker provisioning"
 
@@ -206,7 +212,18 @@ create_cluster() {
     local install_rc=0
     wait "$installer_pid" || install_rc=$?
 
-    # Wait for monitor to finish (may still be doing zone fallback)
+    if [[ $install_rc -ne 0 ]]; then
+        # Installer failed — kill the monitor, no point waiting
+        kill "$monitor_pid" 2>/dev/null || true
+        wait "$monitor_pid" 2>/dev/null || true
+        log_error "Cluster creation failed (exit code ${install_rc})"
+        log_error "Check logs: ${install_dir}/install.log"
+        # Show last few error lines from the log
+        grep -i "level=error" "${install_dir}/install.log" 2>/dev/null | tail -5 || true
+        return 1
+    fi
+
+    # Installer succeeded — wait for monitor to confirm worker is ready
     local monitor_rc=0
     wait "$monitor_pid" || monitor_rc=$?
 
