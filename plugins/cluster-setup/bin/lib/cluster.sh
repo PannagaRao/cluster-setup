@@ -187,18 +187,35 @@ create_cluster() {
     # On GCP IPI this resolves almost immediately.
     log_phase "Monitoring Worker Provisioning (parallel with installer)"
     {
-        log_info "Waiting for control plane nodes to be Ready..."
-        local cp_wait=0
-        while ! oc get nodes -l 'node-role.kubernetes.io/control-plane' --no-headers 2>/dev/null | grep -q " Ready" && \
-              ! oc get nodes -l 'node-role.kubernetes.io/master' --no-headers 2>/dev/null | grep -q " Ready"; do
-            sleep 15
-            cp_wait=$(( cp_wait + 15 ))
-            if (( cp_wait >= 1200 )); then
-                log_error "Control plane did not become Ready within 20 minutes"
-                return 1
-            fi
-        done
-        log_success "Control plane is Ready, monitoring worker provisioning"
+        if [[ "$cloud" == "gcp" ]]; then
+            # GCP: wait for bootstrap to complete before monitoring workers.
+            # Workers can't join until bootstrap is done.
+            log_info "Waiting for bootstrap to complete before monitoring workers..."
+            local boot_wait=0
+            while ! grep -q "Finished destroying bootstrap resources" "${install_dir}/install.log" 2>/dev/null; do
+                sleep 15
+                boot_wait=$(( boot_wait + 15 ))
+                if (( boot_wait >= 3600 )); then
+                    log_error "Bootstrap did not complete within 60 minutes"
+                    return 1
+                fi
+            done
+            log_success "Bootstrap complete, monitoring worker provisioning"
+        else
+            # AWS: wait for control plane nodes to be Ready (CAPI infra setup)
+            log_info "Waiting for control plane nodes to be Ready..."
+            local cp_wait=0
+            while ! oc get nodes -l 'node-role.kubernetes.io/control-plane' --no-headers 2>/dev/null | grep -q " Ready" && \
+                  ! oc get nodes -l 'node-role.kubernetes.io/master' --no-headers 2>/dev/null | grep -q " Ready"; do
+                sleep 15
+                cp_wait=$(( cp_wait + 15 ))
+                if (( cp_wait >= 1200 )); then
+                    log_error "Control plane did not become Ready within 20 minutes"
+                    return 1
+                fi
+            done
+            log_success "Control plane is Ready, monitoring worker provisioning"
+        fi
 
         if [[ "$gpu" != "none" ]]; then
             monitor_worker_provisioning "$cloud" "$gpu" 1800 "$region"
@@ -208,27 +225,50 @@ create_cluster() {
     } &
     monitor_pid=$!
 
-    # Wait for installer to finish
-    local install_rc=0
-    wait "$installer_pid" || install_rc=$?
+    # Wait for either installer or monitor to finish first.
+    # Monitor finishing first means worker is ready (or all zones exhausted).
+    # Installer finishing first means it timed out or succeeded.
+    local install_rc=0 monitor_rc=0
+    while kill -0 "$installer_pid" 2>/dev/null && kill -0 "$monitor_pid" 2>/dev/null; do
+        sleep 10
+    done
 
-    if [[ $install_rc -ne 0 && "$gpu" != "none" ]]; then
-        # Installer failed but GPU cluster — let monitor continue for zone fallback
-        log_warn "Installer exited with rc=${install_rc} — waiting for GPU worker zone fallback..."
-        grep -i "level=error" "${install_dir}/install.log" 2>/dev/null | tail -3 || true
-    elif [[ $install_rc -ne 0 ]]; then
-        # Non-GPU cluster failed — no zone fallback possible
-        kill "$monitor_pid" 2>/dev/null || true
-        wait "$monitor_pid" 2>/dev/null || true
-        log_error "Cluster creation failed (exit code ${install_rc})"
-        log_error "Check logs: ${install_dir}/install.log"
-        grep -i "level=error" "${install_dir}/install.log" 2>/dev/null | tail -5 || true
-        return 1
+    # Check which finished
+    if ! kill -0 "$monitor_pid" 2>/dev/null; then
+        # Monitor finished first
+        wait "$monitor_pid" || monitor_rc=$?
+        if [[ $monitor_rc -eq 0 ]]; then
+            # Worker is ready — wait for installer to finish
+            log_success "Worker provisioned, waiting for installer to complete..."
+            wait "$installer_pid" || install_rc=$?
+        else
+            # Monitor failed (all zones exhausted) — kill installer, no point waiting
+            log_error "Worker provisioning failed — all zones exhausted"
+            kill "$installer_pid" 2>/dev/null || true
+            wait "$installer_pid" 2>/dev/null || true
+            return 1
+        fi
+    else
+        # Installer finished first
+        wait "$installer_pid" || install_rc=$?
+        if [[ $install_rc -eq 0 ]]; then
+            # Installer succeeded — wait for monitor
+            wait "$monitor_pid" || monitor_rc=$?
+        elif [[ "$gpu" != "none" ]]; then
+            # Installer timed out but GPU — let monitor continue for zone fallback
+            log_warn "Installer timed out — waiting for GPU worker zone fallback..."
+            grep -i "level=error" "${install_dir}/install.log" 2>/dev/null | tail -3 || true
+            wait "$monitor_pid" || monitor_rc=$?
+        else
+            # Non-GPU failed — done
+            kill "$monitor_pid" 2>/dev/null || true
+            wait "$monitor_pid" 2>/dev/null || true
+            log_error "Cluster creation failed (exit code ${install_rc})"
+            log_error "Check logs: ${install_dir}/install.log"
+            grep -i "level=error" "${install_dir}/install.log" 2>/dev/null | tail -5 || true
+            return 1
+        fi
     fi
-
-    # Wait for monitor to confirm worker is ready
-    local monitor_rc=0
-    wait "$monitor_pid" || monitor_rc=$?
 
     if [[ $install_rc -eq 0 ]]; then
         log_success "Cluster created successfully."
