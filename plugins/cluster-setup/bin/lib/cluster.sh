@@ -212,18 +212,21 @@ create_cluster() {
     local install_rc=0
     wait "$installer_pid" || install_rc=$?
 
-    if [[ $install_rc -ne 0 ]]; then
-        # Installer failed — kill the monitor, no point waiting
+    if [[ $install_rc -ne 0 && "$gpu" != "none" ]]; then
+        # Installer failed but GPU cluster — let monitor continue for zone fallback
+        log_warn "Installer exited with rc=${install_rc} — waiting for GPU worker zone fallback..."
+        grep -i "level=error" "${install_dir}/install.log" 2>/dev/null | tail -3 || true
+    elif [[ $install_rc -ne 0 ]]; then
+        # Non-GPU cluster failed — no zone fallback possible
         kill "$monitor_pid" 2>/dev/null || true
         wait "$monitor_pid" 2>/dev/null || true
         log_error "Cluster creation failed (exit code ${install_rc})"
         log_error "Check logs: ${install_dir}/install.log"
-        # Show last few error lines from the log
         grep -i "level=error" "${install_dir}/install.log" 2>/dev/null | tail -5 || true
         return 1
     fi
 
-    # Installer succeeded — wait for monitor to confirm worker is ready
+    # Wait for monitor to confirm worker is ready
     local monitor_rc=0
     wait "$monitor_pid" || monitor_rc=$?
 
