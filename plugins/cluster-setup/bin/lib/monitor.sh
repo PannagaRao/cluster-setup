@@ -165,24 +165,38 @@ monitor_worker_provisioning() {
             return 0
         fi
 
-        # Check for failed worker machines
+        # Check for failed or stuck worker machines
         local failed_machines
         failed_machines=$(oc get machines.machine.openshift.io -n openshift-machine-api \
                 -o json 2>/dev/null | python3 -c "
-import json, sys
+import json, sys, datetime
 data = json.load(sys.stdin)
 for m in data.get('items', []):
     name = m['metadata']['name']
     if 'worker' not in name:
         continue
     phase = m.get('status', {}).get('phase', '')
+    conditions = m.get('status', {}).get('conditions', [])
+    msg = ' '.join(c.get('message', '') for c in conditions).lower()
     if phase == 'Failed':
-        conditions = m.get('status', {}).get('conditions', [])
-        msg = ' '.join(c.get('message', '') for c in conditions).lower()
-        if any(k in msg for k in ['insufficient', 'capacity', 'zone_resource_pool', 'instance not found', 'instancemissing', \"can't find created instance\"]):
+        recoverable_patterns = ['insufficient', 'capacity', 'zone_resource_pool',
+            'instance not found', 'instancemissing', \"can't find created instance\",
+            'not available', 'machine type', 'resource not found', 'quota']
+        if any(k in msg for k in recoverable_patterns):
             print(f'{name}|recoverable')
         else:
             print(f'{name}|fatal')
+    elif phase == 'Provisioning':
+        # Detect stuck provisioning (>10 min without becoming Provisioned/Running)
+        created = m.get('metadata', {}).get('creationTimestamp', '')
+        if created:
+            try:
+                ct = datetime.datetime.fromisoformat(created.replace('Z', '+00:00'))
+                age_min = (datetime.datetime.now(datetime.timezone.utc) - ct).total_seconds() / 60
+                if age_min > 10:
+                    print(f'{name}|recoverable')
+            except:
+                pass
 " 2>/dev/null || true)
 
         if [[ -n "$failed_machines" ]]; then
