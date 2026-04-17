@@ -177,7 +177,9 @@ for m in data.get('items', []):
         continue
     phase = m.get('status', {}).get('phase', '')
     conditions = m.get('status', {}).get('conditions', [])
-    msg = ' '.join(c.get('message', '') for c in conditions).lower()
+    cond_msg = ' '.join(c.get('message', '') for c in conditions)
+    error_msg = m.get('status', {}).get('errorMessage', '')
+    msg = (cond_msg + ' ' + error_msg).lower()
     if phase == 'Failed':
         recoverable_patterns = ['insufficient', 'capacity', 'zone_resource_pool',
             'instance not found', 'instancemissing', \"can't find created instance\",
