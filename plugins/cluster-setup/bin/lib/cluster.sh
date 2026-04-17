@@ -109,10 +109,8 @@ create_cluster() {
     fi
     log_info "Cluster: ${cluster_name}"
 
-    # Setup cloud credentials
-    if [[ "$cloud" == "gcp" ]]; then
-        setup_gcp_service_account "$cluster_name"
-    elif [[ "$cloud" == "aws" ]]; then
+    # Verify AWS credentials (GCP credentials already set up in setup.sh)
+    if [[ "$cloud" == "aws" ]]; then
         if [[ ! -f "$HOME/.aws/credentials" ]]; then
             log_error "AWS credentials not found at ~/.aws/credentials"
             return 1
