@@ -203,7 +203,7 @@ resolve_openshift_install() {
     # 2. Check tools dir — verify version matches
     if [[ -x "${TOOLS_DIR}/openshift-install" ]]; then
         local cached_version
-        cached_version=$("${TOOLS_DIR}/openshift-install" version 2>/dev/null | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+        cached_version=$("${TOOLS_DIR}/openshift-install" version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
         if [[ "$cached_version" == "$version" || "$cached_version" == "${version%.*}."* ]]; then
             OPENSHIFT_INSTALL="${TOOLS_DIR}/openshift-install"
             log_success "Using openshift-install ${cached_version} from ${TOOLS_DIR}/"
@@ -216,7 +216,7 @@ resolve_openshift_install() {
     # 3. Check PATH — verify version matches
     if command -v openshift-install &>/dev/null; then
         local path_version
-        path_version=$(openshift-install version 2>/dev/null | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+        path_version=$(openshift-install version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
         if [[ "$path_version" == "$version" || "$path_version" == "${version%.*}."* ]]; then
             OPENSHIFT_INSTALL="$(command -v openshift-install)"
             log_success "Using openshift-install ${path_version} from PATH: ${OPENSHIFT_INSTALL}"
@@ -262,7 +262,7 @@ download_openshift_install() {
 
     # Extract major.minor (e.g. 4.22 from 4.22.0, 4.22.0-ec.5, etc.)
     local minor_version
-    minor_version=$(echo "$version" | grep -oP '^\d+\.\d+')
+    minor_version=$(echo "$version" | grep -oE '^[0-9]+\.[0-9]+')
     url="https://mirror.openshift.com/pub/openshift-v4/${arch}/clients/ocp-dev-preview/candidate-${minor_version}/openshift-install-${platform}.tar.gz"
     log_info "Trying nightly: ${url}"
     if curl -fSL -o "$tarball" "$url" 2>/dev/null; then
