@@ -48,6 +48,9 @@ generate_gcp_install_config() {
     # Control plane zones — pick 3 zones in the same region
     local cp_zones
     cp_zones=$(gcloud compute zones list --filter="region=${region}" --format="value(name)" --sort-by="name" 2>/dev/null | head -3 | paste -sd' ')
+    if [[ -z "$cp_zones" ]]; then
+        cp_zones="${region}-b ${region}-c ${region}-d"
+    fi
     read -ra cp_zone_array <<< "$cp_zones"
 
     # GPU instances require onHostMaintenance: Terminate (not needed for non-GPU)

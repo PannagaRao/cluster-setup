@@ -390,6 +390,9 @@ fi
 # Generate config only mode — produce install-config and exit
 # ============================================================
 if [[ "$GENERATE_CONFIG_ONLY" == "true" ]]; then
+    if [[ "$CLOUD" == "gcp" ]]; then
+        setup_gcp_service_account "$CLUSTER_NAME"
+    fi
     mkdir -p "$INSTALL_DIR"
     generate_install_config "$CLOUD" "$CLUSTER_NAME" "$GPU" "$REGION" "$WORKER_ZONE" \
         "$PULL_SECRET" "$SSH_KEY" "$INSTALL_DIR" "$INSTANCE_TYPE"
