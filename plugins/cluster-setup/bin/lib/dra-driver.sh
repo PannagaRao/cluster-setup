@@ -44,11 +44,11 @@ install_dra_driver() {
     fi
 
     # Set feature gate overrides based on mode
-    local set_overrides=""
+    local set_overrides="--set gpuResourcesEnabledOverride=true"
     if [[ "$mig_mode" == "timeslicing" ]]; then
-        set_overrides="--set featureGates.DynamicMIG=false --set featureGates.TimeSlicingSettings=true"
+        set_overrides="${set_overrides} --set featureGates.DynamicMIG=false --set featureGates.TimeSlicingSettings=true"
     else
-        set_overrides="--set featureGates.DynamicMIG=true"
+        set_overrides="${set_overrides} --set featureGates.DynamicMIG=true"
     fi
 
     # A100 GPUs on cloud VMs do not support GPU reset (nvidia-smi --gpu-reset
