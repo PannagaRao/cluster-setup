@@ -380,7 +380,7 @@ patch_machineset_gpu_accelerator() {
 
     # Scale back up and monitor with zone fallback
     oc scale machineset.machine.openshift.io "$machineset" -n openshift-machine-api --replicas=${WORKERS:-1}
-    log_info "Scaled MachineSet back to 1, waiting for GPU worker node..."
+    log_info "Scaled MachineSet to ${WORKERS:-1}, waiting for GPU worker nodes..."
 
     # Get zone fallback list filtered to region
     local zones zone_array current_zone_idx=0
