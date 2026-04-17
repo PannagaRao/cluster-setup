@@ -77,7 +77,11 @@ If the cloud CLI command fails (e.g. not authenticated), fall back to presenting
 
 Use `AskUserQuestion` to present categorized options (GPU vs general-purpose) and let the user pick.
 
-### 1g. GPU Detection and DRA Stack (only for GPU instances)
+### 1g. Worker Count
+
+Ask user how many worker nodes (default 1). Pass as `--workers N` to setup.sh.
+
+### 1h. GPU Detection and DRA Stack (only for GPU instances)
 
 **If the user picked a GPU instance** (g4dn/p4d/p5/g2/a2/a3, or n1-standard with T4):
 
@@ -100,7 +104,7 @@ Use `AskUserQuestion`: **"Install the NVIDIA DRA stack?"** with options:
 
 **If the user picked a non-GPU instance**: skip this step entirely, proceed to summary.
 
-### 1h. GPU+DRA Configuration (only if DRA stack requested and OCP >= 4.21)
+### 1i. GPU+DRA Configuration (only if DRA stack requested and OCP >= 4.21)
 
 Apply all GPU knowledge from the repo:
 
@@ -143,7 +147,7 @@ Use `AskUserQuestion`: "How to proceed?" with options:
 
 Ask: "These are the component versions that will be installed. Do you want to change any?"
 
-### 1i. Summary and Confirmation
+### 1j. Summary and Confirmation
 
 Present a summary:
 
@@ -196,7 +200,7 @@ Phases: cluster creation only
 
 **IMPORTANT:** Always pass `--region <region>` to the script. The region from step 1b must be included in the command.
 
-### 1j. Generate and Show install-config
+### 1k. Generate and Show install-config
 
 Before running the setup script, generate the install-config.yaml so the user can review it. Run `bin/setup.sh` with `--generate-config-only` to produce the file without starting the cluster:
 

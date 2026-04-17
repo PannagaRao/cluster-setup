@@ -76,7 +76,7 @@ ${on_host_maintenance:+      onHostMaintenance: ${on_host_maintenance}}
       osDisk:
         diskSizeGB: ${disk_size}
         diskType: pd-ssd
-  replicas: 1
+  replicas: ${WORKERS:-1}
 controlPlane:
   architecture: amd64
   hyperthreading: Enabled
@@ -150,7 +150,7 @@ compute:
       type: ${instance_type}
       zones:
       - ${worker_zone}
-  replicas: 1
+  replicas: ${WORKERS:-1}
 controlPlane:
   architecture: amd64
   hyperthreading: Enabled

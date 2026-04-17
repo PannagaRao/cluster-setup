@@ -49,6 +49,7 @@ Instance type (at least one of --gpu or --instance-type required):
   --instance-type TYPE     Worker instance type (e.g. m6i.xlarge, g4dn.xlarge)
                            GPU auto-detected from instance family when --gpu omitted
   --no-gpu                 Skip GPU stack even on GPU-capable instances
+  --workers N              Number of worker nodes (default: 1)
 
 GPU/DRA stack (requires OCP 4.21+):
   --dra                    Install NVIDIA DRA stack (feature gates, cert-manager,
@@ -95,6 +96,7 @@ CLOUD=""
 GPU=""
 INSTANCE_TYPE=""
 NO_GPU=false
+WORKERS=1
 DRA=false
 PULL_SECRET=""
 MIG_MODE="timeslicing"
@@ -114,6 +116,7 @@ while [[ $# -gt 0 ]]; do
         --gpu) GPU="$2"; shift 2 ;;
         --instance-type) INSTANCE_TYPE="$2"; shift 2 ;;
         --no-gpu) NO_GPU=true; shift ;;
+        --workers) WORKERS="$2"; shift 2 ;;
         --dra) DRA=true; shift ;;
         --pull-secret) PULL_SECRET="$2"; shift 2 ;;
         --ocp-version) OCP_VERSION="$2"; shift 2 ;;
@@ -355,6 +358,7 @@ fi
 log_phase "Cluster Setup Summary"
 echo "  Cluster:       ${CLUSTER_NAME}"
 echo "  Cloud:         ${CLOUD}"
+echo "  Workers:       ${WORKERS}"
 if has_dra; then
     echo "  GPU:           ${GPU} (${INSTANCE_TYPE})"
     echo "  DRA Stack:     yes"

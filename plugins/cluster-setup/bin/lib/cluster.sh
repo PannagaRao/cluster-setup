@@ -220,7 +220,7 @@ create_cluster() {
         if [[ "$gpu" != "none" ]]; then
             monitor_worker_provisioning "$cloud" "$gpu" 1800 "$region"
         else
-            wait_for_nodes_ready 1800 1
+            wait_for_nodes_ready 1800 "${WORKERS:-1}"
         fi
     } &
     monitor_pid=$!
@@ -373,7 +373,7 @@ patch_machineset_gpu_accelerator() {
     log_success "MachineSet patched with ${accelerator_type}"
 
     # Scale back up and monitor with zone fallback
-    oc scale machineset.machine.openshift.io "$machineset" -n openshift-machine-api --replicas=1
+    oc scale machineset.machine.openshift.io "$machineset" -n openshift-machine-api --replicas=${WORKERS:-1}
     log_info "Scaled MachineSet back to 1, waiting for GPU worker node..."
 
     # Get zone fallback list filtered to region
@@ -440,7 +440,7 @@ for m in data.get('items', []):
                 delete_failed_worker_machines
                 oc patch machineset.machine.openshift.io "$machineset" -n openshift-machine-api --type=merge \
                     -p "{\"spec\":{\"template\":{\"spec\":{\"providerSpec\":{\"value\":{\"zone\":\"${new_zone}\"}}}}}}" 2>/dev/null || true
-                oc scale machineset.machine.openshift.io "$machineset" -n openshift-machine-api --replicas=1
+                oc scale machineset.machine.openshift.io "$machineset" -n openshift-machine-api --replicas=${WORKERS:-1}
                 log_info "MachineSet patched to zone ${new_zone}, waiting for worker..."
             else
                 log_error "Machine failed: ${fail_msg}"
