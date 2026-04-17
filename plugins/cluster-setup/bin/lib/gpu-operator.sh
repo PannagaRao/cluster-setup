@@ -59,5 +59,35 @@ install_gpu_operator() {
         oc adm policy add-scc-to-user privileged -n "$namespace" -z "$sa" 2>/dev/null || true
     done
 
+    # Check for driver ImagePullBackOff — nightly/candidate builds may not have
+    # a pre-built driver image for the current RHCOS version.
+    log_info "Waiting for GPU driver pod to start (checking for image pull issues)..."
+    local drv_check=0
+    while (( drv_check < 180 )); do
+        local pull_err
+        pull_err=$(oc get pods -n "$namespace" --no-headers 2>/dev/null \
+            | grep "nvidia-driver-daemonset" | grep -i "ImagePullBackOff\|ErrImagePull" || true)
+        if [[ -n "$pull_err" ]]; then
+            local current_driver
+            current_driver=$(oc get clusterpolicy cluster-policy -o jsonpath='{.spec.driver.version}' 2>/dev/null || echo "unknown")
+            local rhcos_version
+            rhcos_version=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].status.nodeInfo.osImage}' 2>/dev/null || echo "unknown")
+            log_error "GPU driver image pull failed (driver: ${current_driver}, RHCOS: ${rhcos_version})"
+            log_error "The default driver has no pre-built image for this RHCOS version."
+            log_error "Fix: oc patch clusterpolicy cluster-policy --type merge -p '{\"spec\":{\"driver\":{\"version\":\"<compatible-version>\"}}}'"
+            log_error "Check available versions at: https://catalog.ngc.nvidia.com/orgs/nvidia/containers/driver/tags"
+            return 1
+        fi
+        # Check if driver pod is running (success)
+        local running
+        running=$(oc get pods -n "$namespace" --no-headers 2>/dev/null \
+            | grep "nvidia-driver-daemonset" | grep -c "Running" || true)
+        if (( running > 0 )); then
+            break
+        fi
+        sleep 15
+        drv_check=$(( drv_check + 15 ))
+    done
+
     log_success "GPU Operator installed — driver compilation continues in background"
 }
