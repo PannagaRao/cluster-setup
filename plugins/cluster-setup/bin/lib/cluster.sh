@@ -427,8 +427,9 @@ import json, sys
 data = json.load(sys.stdin)
 for m in data.get('items', []):
     if 'worker' in m['metadata']['name'] and m.get('status',{}).get('phase') == 'Failed':
-        for c in m.get('status',{}).get('conditions',[]):
-            print(c.get('message',''))
+        msgs = [c.get('message','') for c in m.get('status',{}).get('conditions',[])]
+        msgs.append(m.get('status',{}).get('errorMessage',''))
+        print(' '.join(msgs))
         break
 " 2>/dev/null || true)
 
