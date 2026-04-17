@@ -20,7 +20,7 @@ enable_dra_feature_gates() {
     # Detect the field type for customNoUpgrade.enabled — older OCP uses []object
     # with {"featureGateName": "..."}, while 4.21+ uses []string
     local field_type
-    field_type=$(oc explain featuregate.spec.customNoUpgrade.enabled 2>/dev/null | sed -n 's/.*<\[\(.*\)\]>.*/\1/p' | head -1)
+    field_type=$(oc explain featuregate.spec.customNoUpgrade.enabled 2>/dev/null | sed -n 's/.*<\[\(.*\)\]>.*/\1/p' || true)
     field_type="${field_type:-string}"
 
     # Build the feature gate patch

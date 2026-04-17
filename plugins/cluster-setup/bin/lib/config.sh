@@ -262,7 +262,7 @@ download_openshift_install() {
 
     # Extract major.minor (e.g. 4.22 from 4.22.0, 4.22.0-ec.5, etc.)
     local minor_version
-    minor_version=$(echo "$version" | grep -oE '^[0-9]+\.[0-9]+')
+    [[ "$version" =~ ^([0-9]+\.[0-9]+) ]] && minor_version="${BASH_REMATCH[1]}"
     url="https://mirror.openshift.com/pub/openshift-v4/${arch}/clients/ocp-dev-preview/candidate-${minor_version}/openshift-install-${platform}.tar.gz"
     log_info "Trying nightly: ${url}"
     if curl -fSL -o "$tarball" "$url" 2>/dev/null; then
