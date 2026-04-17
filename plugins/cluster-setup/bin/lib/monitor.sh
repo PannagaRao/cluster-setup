@@ -157,11 +157,11 @@ monitor_worker_provisioning() {
     log_info "Monitoring worker provisioning (zones: ${zones}, 2 passes)"
     local elapsed=0 poll_interval=15
     while (( elapsed < timeout )); do
-        # Check if any worker node is Ready
+        # Check if all requested workers are Ready
         local ready
         ready=$(oc get nodes -l node-role.kubernetes.io/worker --no-headers 2>/dev/null | grep -c " Ready" || true)
-        if (( ready > 0 )); then
-            log_success "Worker node is Ready!"
+        if (( ready >= ${WORKERS:-1} )); then
+            log_success "Worker nodes are Ready (${ready}/${WORKERS:-1})!"
             return 0
         fi
 
