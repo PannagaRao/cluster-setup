@@ -16,6 +16,13 @@ setup_gcp_service_account() {
 
     log_info "Setting up GCP service account: ${sa_email}"
 
+    # Ensure we're using the user's account for SA management, not a stale SA
+    local user_account
+    user_account=$(gcloud auth list --filter="account~@redhat.com" --format="value(account)" 2>/dev/null | head -1)
+    if [[ -n "$user_account" ]]; then
+        gcloud config set account "$user_account" &>/dev/null
+    fi
+
     # Check if SA already exists
     if gcloud iam service-accounts describe "$sa_email" --project="$GCP_PROJECT" &>/dev/null; then
         log_success "Service account already exists: ${sa_email}"
@@ -60,23 +67,24 @@ setup_gcp_service_account() {
     done
     log_success "Service account roles granted"
 
-    # Export key if not present
+    # Validate existing key or create new one
+    mkdir -p "$key_dir"
+    if [[ -f "$key_path" ]]; then
+        # Test key by parsing the client_email — if SA was deleted, regenerate
+        local key_email
+        key_email=$(python3 -c "import json; print(json.load(open('$key_path')).get('client_email',''))" 2>/dev/null || echo "")
+        if [[ "$key_email" != "$sa_email" ]]; then
+            log_warn "Key file is for a different SA (${key_email}) — regenerating"
+            rm -f "$key_path"
+        fi
+    fi
+
     if [[ ! -f "$key_path" ]]; then
-        mkdir -p "$key_dir"
         gcloud iam service-accounts keys create "$key_path" \
             --iam-account="$sa_email" --project="$GCP_PROJECT"
-        log_success "Service account key exported to: ${key_path}"
+        log_success "Service account key created: ${key_path}"
     else
-        # Validate existing key is still valid
-        if ! gcloud auth activate-service-account --key-file="$key_path" --project="$GCP_PROJECT" &>/dev/null; then
-            log_warn "Existing service account key is stale — regenerating"
-            rm -f "$key_path"
-            gcloud iam service-accounts keys create "$key_path" \
-                --iam-account="$sa_email" --project="$GCP_PROJECT"
-            log_success "Service account key regenerated: ${key_path}"
-        else
-            log_success "Service account key already exists: ${key_path}"
-        fi
+        log_success "Service account key exists: ${key_path}"
     fi
 
     export GOOGLE_APPLICATION_CREDENTIALS="$key_path"
