@@ -30,10 +30,10 @@ Ask for the path to their pull secret file. Both formats are supported — do NO
 
 The setup script auto-detects the format.
 
-### 1e. OCP Version and Installer
+### 1e. OCP Version
 
 - **OCP version**: default `4.21.0`, or the version they want
-- **openshift-install path**: if they have a specific binary, ask for its path. Otherwise it will be auto-downloaded for the chosen OCP version
+- Do NOT ask for or manually resolve the openshift-install binary — the setup script auto-downloads the correct version (stable or candidate). Just pass `--ocp-version`.
 
 ### 1f. Instance Type Selection
 

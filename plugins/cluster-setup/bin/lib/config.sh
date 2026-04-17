@@ -260,8 +260,9 @@ download_openshift_install() {
     log_warn "Nightly builds require registry.ci.openshift.org auth in your pull secret."
     log_warn "If not present, add it from https://console-openshift-console.apps.ci.l2s4.p1.openshiftapps.com/"
 
-    # Extract major.minor for candidate path
-    local minor_version="${version%.*}"
+    # Extract major.minor (e.g. 4.22 from 4.22.0, 4.22.0-ec.5, etc.)
+    local minor_version
+    minor_version=$(echo "$version" | grep -oP '^\d+\.\d+')
     url="https://mirror.openshift.com/pub/openshift-v4/${arch}/clients/ocp-dev-preview/candidate-${minor_version}/openshift-install-${platform}.tar.gz"
     log_info "Trying nightly: ${url}"
     if curl -fSL -o "$tarball" "$url" 2>/dev/null; then
