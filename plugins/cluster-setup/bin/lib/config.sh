@@ -230,24 +230,42 @@ download_openshift_install() {
         aarch64) arch="arm64" ;;
     esac
 
-    url="https://mirror.openshift.com/pub/openshift-v4/${arch}/clients/ocp/${version}/openshift-install-${platform}.tar.gz"
-
     mkdir -p "$TOOLS_DIR"
     local tarball="${TOOLS_DIR}/openshift-install-${version}.tar.gz"
 
-    log_info "Downloading from: ${url}"
-    if ! curl -fSL -o "$tarball" "$url"; then
-        log_error "Failed to download openshift-install ${version}"
-        log_error "URL: ${url}"
-        log_error "Set OPENSHIFT_INSTALL=/path/to/openshift-install or place it in bin/tools/"
-        return 1
+    # Try stable/GA release first
+    url="https://mirror.openshift.com/pub/openshift-v4/${arch}/clients/ocp/${version}/openshift-install-${platform}.tar.gz"
+    log_info "Trying stable release: ${url}"
+    if curl -fSL -o "$tarball" "$url" 2>/dev/null; then
+        tar -xzf "$tarball" -C "$TOOLS_DIR" openshift-install
+        rm -f "$tarball"
+        chmod +x "${TOOLS_DIR}/openshift-install"
+        OPENSHIFT_INSTALL="${TOOLS_DIR}/openshift-install"
+        log_success "Downloaded openshift-install ${version} (stable) to ${TOOLS_DIR}/"
+        return 0
     fi
 
-    tar -xzf "$tarball" -C "$TOOLS_DIR" openshift-install
-    rm -f "$tarball"
-    chmod +x "${TOOLS_DIR}/openshift-install"
-    OPENSHIFT_INSTALL="${TOOLS_DIR}/openshift-install"
-    log_success "Downloaded openshift-install ${version} to ${TOOLS_DIR}/"
+    # Stable not available — try nightly
+    log_warn "OCP ${version} is not available as a stable release. Trying nightly..."
+    log_warn "Nightly builds require registry.ci.openshift.org auth in your pull secret."
+    log_warn "If not present, add it from https://console-openshift-console.apps.ci.l2s4.p1.openshiftapps.com/"
+
+    # Extract major.minor for candidate path
+    local minor_version="${version%.*}"
+    url="https://mirror.openshift.com/pub/openshift-v4/${arch}/clients/ocp-dev-preview/candidate-${minor_version}/openshift-install-${platform}.tar.gz"
+    log_info "Trying nightly: ${url}"
+    if curl -fSL -o "$tarball" "$url" 2>/dev/null; then
+        tar -xzf "$tarball" -C "$TOOLS_DIR" openshift-install
+        rm -f "$tarball"
+        chmod +x "${TOOLS_DIR}/openshift-install"
+        OPENSHIFT_INSTALL="${TOOLS_DIR}/openshift-install"
+        log_success "Downloaded openshift-install ${minor_version} (nightly) to ${TOOLS_DIR}/"
+        return 0
+    fi
+
+    log_error "Failed to download openshift-install ${version} (tried stable and nightly)"
+    log_error "Set OPENSHIFT_INSTALL=/path/to/openshift-install or place it in ${TOOLS_DIR}/"
+    return 1
 }
 
 # ============================================================
