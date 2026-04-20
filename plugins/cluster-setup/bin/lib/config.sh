@@ -285,10 +285,10 @@ DRA_DRIVER_CHART_VERSION="${DRA_DRIVER_CHART_VERSION:-25.12.0}"
 # ============================================================
 # DRA Feature Gates (applied to OCP cluster)
 # ============================================================
-# Base gates — always enabled for DRA
+# Only alpha gates that are off by default need to be enabled.
+# DynamicResourceAllocation (GA) and DRAResourceClaimDeviceStatus (Beta)
+# are on by default in K8s 1.34+ (OCP 4.21+).
 DRA_FEATURE_GATES=(
-    "DynamicResourceAllocation=true"
-    "DRAResourceClaimDeviceStatus=true"
     "DRAExtendedResource=true"
 )
 # DRAPartitionableDevices is added conditionally by features.sh when MIG mode is dynamicmig
