@@ -56,14 +56,14 @@ spec:
   installPlanApproval: Automatic
 EOF
 
-    log_info "cert-manager subscription created. Waiting for operator pods..."
+    log_info "cert-manager subscription created. Waiting for operator to be ready..."
 
-    # Wait for cert-manager pods to be Running
-    # The operator deploys into cert-manager namespace
-    wait_for_pods_running "cert-manager" "app.kubernetes.io/instance=cert-manager" 600
+    # Wait for CSV to succeed (works for both Red Hat and community operators)
+    wait_for "cert-manager CSV to succeed" 600 15 \
+        bash -c "oc get csv -n ${target_ns} --no-headers 2>/dev/null | grep -i cert-manager | grep -q Succeeded"
 
-    # Verify cert-manager is functional by checking webhook
-    wait_for "cert-manager webhook ready" 120 10 \
+    # Wait for cert-manager webhook deployment (confirms it's functional)
+    wait_for "cert-manager webhook ready" 300 10 \
         oc get deployment cert-manager-webhook -n cert-manager -o jsonpath='{.status.readyReplicas}' 2>/dev/null
 
     log_success "cert-manager installed and ready"
