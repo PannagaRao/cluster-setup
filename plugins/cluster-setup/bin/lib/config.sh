@@ -242,39 +242,35 @@ download_openshift_install() {
 
     mkdir -p "$TOOLS_DIR"
     local tarball="${TOOLS_DIR}/openshift-install-${version}.tar.gz"
-
-    # Try stable/GA release first
-    url="https://mirror.openshift.com/pub/openshift-v4/${arch}/clients/ocp/${version}/openshift-install-${platform}.tar.gz"
-    log_info "Trying stable release: ${url}"
-    if curl -fSL -o "$tarball" "$url" 2>/dev/null; then
-        tar -xzf "$tarball" -C "$TOOLS_DIR" openshift-install
-        rm -f "$tarball"
-        chmod +x "${TOOLS_DIR}/openshift-install"
-        OPENSHIFT_INSTALL="${TOOLS_DIR}/openshift-install"
-        log_success "Downloaded openshift-install ${version} (stable) to ${TOOLS_DIR}/"
-        return 0
-    fi
-
-    # Stable not available — try nightly
-    log_warn "OCP ${version} is not available as a stable release. Trying nightly..."
-    log_warn "Nightly builds require registry.ci.openshift.org auth in your pull secret."
-    log_warn "If not present, add it from https://console-openshift-console.apps.ci.l2s4.p1.openshiftapps.com/"
-
-    # Extract major.minor (e.g. 4.22 from 4.22.0, 4.22.0-ec.5, etc.)
-    local minor_version
+    local minor_version=""
     [[ "$version" =~ ^([0-9]+\.[0-9]+) ]] && minor_version="${BASH_REMATCH[1]}"
-    url="https://mirror.openshift.com/pub/openshift-v4/${arch}/clients/ocp-dev-preview/candidate-${minor_version}/openshift-install-${platform}.tar.gz"
-    log_info "Trying nightly: ${url}"
-    if curl -fSL -o "$tarball" "$url" 2>/dev/null; then
-        tar -xzf "$tarball" -C "$TOOLS_DIR" openshift-install
-        rm -f "$tarball"
-        chmod +x "${TOOLS_DIR}/openshift-install"
-        OPENSHIFT_INSTALL="${TOOLS_DIR}/openshift-install"
-        log_success "Downloaded openshift-install ${minor_version} (nightly) to ${TOOLS_DIR}/"
-        return 0
-    fi
 
-    log_error "Failed to download openshift-install ${version} (tried stable and nightly)"
+    # Try URLs in order: exact version, stable-X.Y, candidate-X.Y
+    local urls=(
+        "https://mirror.openshift.com/pub/openshift-v4/${arch}/clients/ocp/${version}/openshift-install-${platform}.tar.gz"
+        "https://mirror.openshift.com/pub/openshift-v4/${arch}/clients/ocp/stable-${minor_version}/openshift-install-${platform}.tar.gz"
+        "https://mirror.openshift.com/pub/openshift-v4/${arch}/clients/ocp-dev-preview/candidate-${minor_version}/openshift-install-${platform}.tar.gz"
+    )
+    local labels=("stable ${version}" "stable-${minor_version} (latest)" "candidate-${minor_version} (nightly)")
+
+    for i in "${!urls[@]}"; do
+        log_info "Trying: ${labels[$i]}"
+        if curl -fSL -o "$tarball" "${urls[$i]}" 2>/dev/null; then
+            tar -xzf "$tarball" -C "$TOOLS_DIR" openshift-install
+            rm -f "$tarball"
+            chmod +x "${TOOLS_DIR}/openshift-install"
+            OPENSHIFT_INSTALL="${TOOLS_DIR}/openshift-install"
+            # Warn about nightly requiring registry.ci auth
+            if [[ "${labels[$i]}" == *"nightly"* ]]; then
+                log_warn "Using nightly build — requires registry.ci.openshift.org auth in your pull secret"
+                log_warn "If not present, add it from https://console-openshift-console.apps.ci.l2s4.p1.openshiftapps.com/"
+            fi
+            log_success "Downloaded openshift-install (${labels[$i]}) to ${TOOLS_DIR}/"
+            return 0
+        fi
+    done
+
+    log_error "Failed to download openshift-install ${version} (tried stable, stable-${minor_version}, candidate-${minor_version})"
     log_error "Set OPENSHIFT_INSTALL=/path/to/openshift-install or place it in ${TOOLS_DIR}/"
     return 1
 }
