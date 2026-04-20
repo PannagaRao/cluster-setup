@@ -203,7 +203,7 @@ resolve_openshift_install() {
     # 2. Check tools dir — verify version matches
     if [[ -x "${TOOLS_DIR}/openshift-install" ]]; then
         local cached_version
-        cached_version=$("${TOOLS_DIR}/openshift-install" version 2>/dev/null | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+        cached_version=$("${TOOLS_DIR}/openshift-install" version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
         if [[ "$cached_version" == "$version" || "$cached_version" == "${version%.*}."* ]]; then
             OPENSHIFT_INSTALL="${TOOLS_DIR}/openshift-install"
             log_success "Using openshift-install ${cached_version} from ${TOOLS_DIR}/"
@@ -216,7 +216,7 @@ resolve_openshift_install() {
     # 3. Check PATH — verify version matches
     if command -v openshift-install &>/dev/null; then
         local path_version
-        path_version=$(openshift-install version 2>/dev/null | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "unknown")
+        path_version=$(openshift-install version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
         if [[ "$path_version" == "$version" || "$path_version" == "${version%.*}."* ]]; then
             OPENSHIFT_INSTALL="$(command -v openshift-install)"
             log_success "Using openshift-install ${path_version} from PATH: ${OPENSHIFT_INSTALL}"
@@ -242,8 +242,8 @@ download_openshift_install() {
 
     mkdir -p "$TOOLS_DIR"
     local tarball="${TOOLS_DIR}/openshift-install-${version}.tar.gz"
-    local minor_version
-    minor_version=$(echo "$version" | grep -oP '^\d+\.\d+')
+    local minor_version=""
+    [[ "$version" =~ ^([0-9]+\.[0-9]+) ]] && minor_version="${BASH_REMATCH[1]}"
 
     # Try URLs in order: exact version, stable-X.Y, candidate-X.Y
     local urls=(
