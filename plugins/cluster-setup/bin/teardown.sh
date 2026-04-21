@@ -14,6 +14,7 @@ Options:
   --resources-only        Only remove GPU/DRA resources (keep cluster)
   --install-dir DIR       Cluster install directory (default: /tmp/ocp-<name>)
   --cluster-name NAME     Cluster name (for destroy)
+  --openshift-install PATH  Path to openshift-install binary
   -h, --help              Show this help
 EOF
 }
@@ -27,6 +28,7 @@ while [[ $# -gt 0 ]]; do
         --resources-only) RESOURCES_ONLY=true; shift ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
         --cluster-name) CLUSTER_NAME="$2"; shift 2 ;;
+        --openshift-install) OPENSHIFT_INSTALL="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) log_error "Unknown option: $1"; exit 1 ;;
     esac
@@ -39,6 +41,12 @@ fi
 # Set KUBECONFIG
 if [[ -n "$INSTALL_DIR" && -f "${INSTALL_DIR}/auth/kubeconfig" ]]; then
     export KUBECONFIG="${INSTALL_DIR}/auth/kubeconfig"
+fi
+
+# Set GCP credentials if the service account key exists
+GCP_KEY="$HOME/.gcp/ocp-dev/osServiceAccount.json"
+if [[ -f "$GCP_KEY" ]]; then
+    export GOOGLE_APPLICATION_CREDENTIALS="$GCP_KEY"
 fi
 
 # Delete a namespace without blocking — patch finalizers if stuck
