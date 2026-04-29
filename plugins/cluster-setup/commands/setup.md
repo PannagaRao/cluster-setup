@@ -10,7 +10,7 @@ Use `AskUserQuestion`: **"Which cloud provider?"** with options AWS, GCP.
 
 **If GCP:** Run `gcloud config get-value project` to get the current project. Then set it immediately: `export GCP_PROJECT=<project>`. Always pass `GCP_PROJECT` as an env var prefix when calling setup.sh (e.g. `GCP_PROJECT=openshift-gce-devel bash ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh ...`). Do NOT run the script without it — it will fail.
 
-**If AWS:** Run `aws sts get-caller-identity` and show the user the Account ID and ARN so they can confirm the right account is being used. Warn if not configured.
+**If AWS:** Run `aws sts get-caller-identity` and show the user the Account ID, ARN, and active profile (`echo $AWS_PROFILE` or "default" if unset) so they can confirm the right account. Also run `aws iam list-account-aliases` to show the account name if available. Warn if not configured.
 
 ### 1b. Region
 
