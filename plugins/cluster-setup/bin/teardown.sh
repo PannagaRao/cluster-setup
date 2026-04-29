@@ -129,14 +129,23 @@ destroy_cluster() {
         exit 1
     fi
 
-    # Try to resolve openshift-install without downloading (cluster metadata has OCP version)
+    # Try to resolve openshift-install: saved path > tools dir > PATH
+    if [[ ! -x "$OPENSHIFT_INSTALL" ]]; then
+        if [[ -f "${INSTALL_DIR}/.openshift-install-path" ]]; then
+            local saved_path
+            saved_path=$(cat "${INSTALL_DIR}/.openshift-install-path")
+            if [[ -x "$saved_path" ]]; then
+                OPENSHIFT_INSTALL="$saved_path"
+            fi
+        fi
+    fi
     if [[ ! -x "$OPENSHIFT_INSTALL" ]]; then
         if [[ -x "${TOOLS_DIR}/openshift-install" ]]; then
             OPENSHIFT_INSTALL="${TOOLS_DIR}/openshift-install"
         elif command -v openshift-install &>/dev/null; then
             OPENSHIFT_INSTALL="$(command -v openshift-install)"
         else
-            log_error "openshift-install not found. Provide OPENSHIFT_INSTALL env var or place binary in bin/tools/"
+            log_error "openshift-install not found. Provide --openshift-install or OPENSHIFT_INSTALL env var"
             return 1
         fi
     fi

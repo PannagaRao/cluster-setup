@@ -347,6 +347,10 @@ fi
 # Resolve openshift-install binary
 resolve_openshift_install "$OCP_VERSION"
 
+# Persist installer path so teardown can find it
+mkdir -p "$INSTALL_DIR"
+echo "$OPENSHIFT_INSTALL" > "${INSTALL_DIR}/.openshift-install-path"
+
 # Auto-gate MIG mode (only when DRA stack is selected)
 if has_dra; then
     MIG_MODE=$(get_mig_mode "$GPU" "$MIG_MODE")

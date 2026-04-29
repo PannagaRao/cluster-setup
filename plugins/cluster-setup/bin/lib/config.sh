@@ -233,11 +233,15 @@ download_openshift_install() {
     local version="$1"
     local platform arch url
 
-    platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
-    arch="$(uname -m)"
-    case "$arch" in
-        x86_64)  arch="amd64" ;;
-        aarch64) arch="arm64" ;;
+    local os_name
+    os_name="$(uname -s)"
+    arch="amd64"
+
+    case "${os_name}-$(uname -m)" in
+        Linux-x86_64)   platform="linux" ;;
+        Linux-aarch64)  platform="linux-arm64" ;;
+        Darwin-x86_64)  platform="mac" ;;
+        Darwin-arm64)   platform="mac-arm64" ;;
     esac
 
     mkdir -p "$TOOLS_DIR"
