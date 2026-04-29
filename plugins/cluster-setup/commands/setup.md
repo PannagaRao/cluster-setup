@@ -33,7 +33,7 @@ The setup script auto-detects the format.
 ### 1e. OCP Version
 
 - **OCP version**: default `4.21.0`, or the version they want
-- **openshift-install**: auto-downloaded if not found. If the user has a specific binary, pass `--openshift-install /path/to/binary`. Do not proactively search for or ask about the binary — just pass `--ocp-version` and let the script handle it.
+- **openshift-install**: Ask the user if they have a specific openshift-install binary. If yes, pass `--openshift-install /path/to/binary`. If no, the script auto-downloads the correct version for the chosen OCP version.
 
 ### 1f. Instance Type Selection
 
