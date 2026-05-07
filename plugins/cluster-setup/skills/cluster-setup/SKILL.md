@@ -8,6 +8,34 @@ allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/*) Bash(oc:*) Bash(gcloud:*) Bash(
 
 Set up OpenShift clusters on AWS or GCP, optionally with NVIDIA GPU hardware and the DRA (Dynamic Resource Allocation) stack.
 
+## Prerequisites
+
+### AWS Authentication (Red Hat Users)
+
+For AWS clusters, you need valid AWS credentials configured. Red Hat users should use SAML-based SSO:
+
+```bash
+# Check if AWS credentials are configured
+${CLAUDE_PLUGIN_ROOT}/bin/check-aws-auth.sh
+
+# If not configured, follow the AWS authentication guide
+# See: references/aws-auth.md for detailed setup instructions
+```
+
+**Quick AWS SSO Setup:**
+1. Install aws-automation tools (VPN required): `pip install git+https://gitlab.cee.redhat.com/compute/aws-automation.git`
+2. Get Kerberos ticket: `kinit your_kerberos_id@REDHAT.COM`
+3. Run: `aws-saml.py` and select your account
+4. Export profile: `export AWS_PROFILE=saml`
+
+### GCP Authentication
+
+For GCP clusters, ensure you're authenticated with `gcloud`:
+```bash
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+```
+
 ## Quick Start
 
 ```bash
@@ -62,6 +90,7 @@ ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh --cluster-name X --cloud gcp --gpu t4 --dra -
 
 Detailed guides loaded on demand:
 
+* **AWS Authentication** — [references/aws-auth.md](references/aws-auth.md) — Red Hat SAML-based SSO setup, credential management, troubleshooting
 * **GPU Matrix** — [references/gpu-matrix.md](references/gpu-matrix.md) — Instance types, zones, quota status, MIG capabilities
 * **DRA Stack** — [references/dra-stack.md](references/dra-stack.md) — Feature gates, version compatibility, helm chart versions, namespaces
 * **Workarounds** — [references/workarounds.md](references/workarounds.md) — A100 MIG on cloud VMs, T4 MachineSet patching, zone fallback, SCC grants
