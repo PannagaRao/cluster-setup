@@ -170,7 +170,8 @@ get_default_worker_zone() {
 # GCP Defaults
 # ============================================================
 GCP_PROJECT="${GCP_PROJECT:-}"
-GCP_BASE_DOMAIN="${GCP_BASE_DOMAIN:-gcp.devcluster.openshift.com}"
+# BASE_DOMAIN can be set via --base-domain; if not, use cloud-specific defaults
+GCP_BASE_DOMAIN="${BASE_DOMAIN:-${GCP_BASE_DOMAIN:-gcp.devcluster.openshift.com}}"
 GCP_CONTROL_PLANE_TYPE="${GCP_CONTROL_PLANE_TYPE:-n2-standard-4}"
 # NOTE: GCP control plane zones are resolved dynamically from the chosen region
 # in install-config.sh via: gcloud compute zones list --filter="region=${region}"
@@ -178,7 +179,9 @@ GCP_CONTROL_PLANE_TYPE="${GCP_CONTROL_PLANE_TYPE:-n2-standard-4}"
 # ============================================================
 # AWS Defaults
 # ============================================================
-AWS_BASE_DOMAIN="${AWS_BASE_DOMAIN:-devcluster.openshift.com}"
+# BASE_DOMAIN can be set via --base-domain; if not, use cloud-specific defaults
+# Default for OpenShift Node Team
+AWS_BASE_DOMAIN="${BASE_DOMAIN:-${AWS_BASE_DOMAIN:-openshift-node-team.devcluster.openshift.com}}"
 AWS_CONTROL_PLANE_TYPE="${AWS_CONTROL_PLANE_TYPE:-m6i.xlarge}"
 
 # ============================================================

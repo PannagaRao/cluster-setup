@@ -10,6 +10,14 @@ Set up OpenShift clusters on AWS or GCP, optionally with NVIDIA GPU hardware and
 
 ## Prerequisites
 
+**⚠️ BEFORE YOU START**: Run the authentication check:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/bin/check-aws-auth.sh
+```
+
+This verifies your AWS credentials are configured and valid. If the check fails, follow the setup instructions below.
+
 ### AWS Authentication (Red Hat Users)
 
 For AWS clusters, you need valid AWS credentials configured. Red Hat users should use SAML-based SSO:
@@ -28,6 +36,14 @@ ${CLAUDE_PLUGIN_ROOT}/bin/check-aws-auth.sh
 3. Run: `aws-saml.py` and select your account
 4. Export profile: `export AWS_PROFILE=saml`
 
+**⚠️ AWS SSO Limitations:**
+The cluster-setup skill currently has limited support for AWS SSO credentials with restricted IAM roles. For installations with AWS SSO, you may need to:
+- Pre-create Route53 hosted zones manually
+- Create custom install-config.yaml with `credentialsMode: Manual`
+- Run `openshift-install` directly instead of using `setup.sh`
+
+See [references/aws-sso-installation.md](references/aws-sso-installation.md) for the complete workflow.
+
 ### GCP Authentication
 
 For GCP clusters, ensure you're authenticated with `gcloud`:
@@ -39,8 +55,8 @@ gcloud config set project YOUR_PROJECT_ID
 ## Quick Start
 
 ```bash
-# General-purpose cluster (no GPU)
-${CLAUDE_PLUGIN_ROOT}/bin/setup.sh --cluster-name my-cluster --cloud aws --pull-secret ~/pull-secret.json --instance-type m6i.xlarge
+# General-purpose cluster (no GPU) - AWS requires --base-domain
+${CLAUDE_PLUGIN_ROOT}/bin/setup.sh --cluster-name my-cluster --cloud aws --pull-secret ~/pull-secret.json --instance-type m6i.xlarge --base-domain openshift-node-team.devcluster.openshift.com
 
 # GPU cluster (hardware only, no DRA stack)
 ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh --cluster-name gpu-test --cloud gcp --gpu t4 --pull-secret ~/pull-secret.json
@@ -82,6 +98,13 @@ ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh --cluster-name X --cloud gcp --gpu t4 --dra -
 ## Important
 
 - `--dra` requires OCP 4.21+ (K8s 1.34+, `resource.k8s.io/v1`)
+- **AWS SSO credentials**: Must use `credentialsMode: Manual` in install-config (see AWS Authentication reference)
+- **Credential expiration**: AWS SSO session credentials expire (typically 15-60 minutes depending on configuration), but installations take 30-45 minutes - credentials may expire mid-installation
+- **Base domain**:
+  - **AWS**: `--base-domain` is **required** (no default)
+  - **GCP**: Defaults to `gcp.devcluster.openshift.com` if not specified
+  - Cluster names become subdomains automatically (e.g., `my-cluster.openshift-node-team.devcluster.openshift.com`)
+- **Route53 hosted zones**: Pre-create the base domain hosted zone before installation if using restricted IAM roles
 - Clusters cost money — destroy when done
 - Zone fallback is automatic on capacity errors and instance-not-found errors (tries all zones twice)
 - GCP T4 accelerator field in install-config is silently ignored — setup handles this via MachineSet patching
@@ -91,6 +114,7 @@ ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh --cluster-name X --cloud gcp --gpu t4 --dra -
 Detailed guides loaded on demand:
 
 * **AWS Authentication** — [references/aws-auth.md](references/aws-auth.md) — Red Hat SAML-based SSO setup, credential management, troubleshooting
+* **AWS SSO Installation** — [references/aws-sso-installation.md](references/aws-sso-installation.md) — Complete workflow for installing with AWS SSO and restricted IAM roles
 * **GPU Matrix** — [references/gpu-matrix.md](references/gpu-matrix.md) — Instance types, zones, quota status, MIG capabilities
 * **DRA Stack** — [references/dra-stack.md](references/dra-stack.md) — Feature gates, version compatibility, helm chart versions, namespaces
 * **Workarounds** — [references/workarounds.md](references/workarounds.md) — A100 MIG on cloud VMs, T4 MachineSet patching, zone fallback, SCC grants

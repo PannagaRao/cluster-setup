@@ -126,6 +126,8 @@ ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh \
   --instance-type m6i.xlarge
 ```
 
+**Note**: For installations with AWS SSO and restricted IAM roles, see the [AWS SSO Installation Guide](aws-sso-installation.md) for additional requirements.
+
 ## Credential Expiration
 
 SAML credentials are temporary and expire after ~12 hours. When they expire:
