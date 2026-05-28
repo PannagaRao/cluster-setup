@@ -119,11 +119,14 @@ create_cluster() {
 
     # Verify AWS credentials (GCP credentials already set up in setup.sh)
     if [[ "$cloud" == "aws" ]]; then
-        if [[ ! -f "$HOME/.aws/credentials" ]]; then
-            log_error "AWS credentials not found at ~/.aws/credentials"
+        if [[ -f "$HOME/.aws/credentials" ]]; then
+            log_success "AWS credentials file found"
+        elif aws sts get-caller-identity &>/dev/null; then
+            log_success "AWS credentials verified (SSO/SAML)"
+        else
+            log_error "AWS credentials not found. Configure ~/.aws/credentials or authenticate via SSO/SAML"
             return 1
         fi
-        log_success "AWS credentials found"
     fi
 
     # If install-config.yaml already exists, use it (user may have edited it)
