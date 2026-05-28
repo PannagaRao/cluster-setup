@@ -59,6 +59,8 @@ GPU/DRA stack (requires OCP 4.21+):
   --smoke-test             Run smoke test after DRA stack setup. Requires --dra.
 
 Optional:
+  --base-domain DOMAIN     Base DNS domain for cluster (REQUIRED for AWS, optional for GCP
+                           with default: gcp.devcluster.openshift.com)
   --ocp-version VERSION    OpenShift version (default: 4.21.0)
   --openshift-install PATH Path to openshift-install binary (auto-downloaded if not found)
   --region REGION          Cloud region (auto-selected if not specified)
@@ -73,14 +75,14 @@ Optional:
   -h, --help               Show this help
 
 Examples:
-  # General-purpose cluster (no GPU)
-  $(basename "$0") --cluster-name my-cluster --cloud aws --pull-secret ~/.pull-secret.json --instance-type m6i.xlarge
+  # General-purpose cluster (no GPU) - AWS requires --base-domain
+  $(basename "$0") --cluster-name my-cluster --cloud aws --pull-secret ~/.pull-secret.json --instance-type m6i.xlarge --base-domain openshift-node-team.devcluster.openshift.com
 
   # T4 on AWS — GPU hardware only, no DRA stack
-  $(basename "$0") --cluster-name my-test --cloud aws --gpu t4 --pull-secret ~/.pull-secret.json
+  $(basename "$0") --cluster-name my-test --cloud aws --gpu t4 --pull-secret ~/.pull-secret.json --base-domain openshift-node-team.devcluster.openshift.com
 
   # T4 on AWS with full DRA stack (OCP 4.21+ required)
-  $(basename "$0") --cluster-name my-test --cloud aws --gpu t4 --dra --pull-secret ~/.pull-secret.json
+  $(basename "$0") --cluster-name my-test --cloud aws --gpu t4 --dra --pull-secret ~/.pull-secret.json --base-domain openshift-node-team.devcluster.openshift.com
 
   # A100 on GCP with DRA stack and DynamicMIG
   $(basename "$0") --cluster-name mig-test --cloud gcp --gpu a100 --dra --pull-secret ~/.pull-secret.json --mig-mode dynamicmig
@@ -99,6 +101,7 @@ NO_GPU=false
 WORKERS=1
 DRA=false
 PULL_SECRET=""
+BASE_DOMAIN=""
 MIG_MODE="timeslicing"
 REGION=""
 WORKER_ZONE=""
@@ -119,6 +122,7 @@ while [[ $# -gt 0 ]]; do
         --workers) WORKERS="$2"; shift 2 ;;
         --dra) DRA=true; shift ;;
         --pull-secret) PULL_SECRET="$2"; shift 2 ;;
+        --base-domain) BASE_DOMAIN="$2"; shift 2 ;;
         --ocp-version) OCP_VERSION="$2"; shift 2 ;;
         --openshift-install) OPENSHIFT_INSTALL="$2"; shift 2 ;;
         --nfd-version) NFD_CHART_VERSION="$2"; shift 2 ;;
@@ -154,6 +158,14 @@ fi
 # Validate cloud
 if [[ "$CLOUD" != "gcp" && "$CLOUD" != "aws" ]]; then
     log_error "Invalid cloud: $CLOUD (must be gcp or aws)"
+    exit 1
+fi
+
+# AWS requires explicit base domain
+if [[ "$CLOUD" == "aws" && -z "$BASE_DOMAIN" ]]; then
+    log_error "AWS clusters require an explicit base domain"
+    log_error "Provide one with: --base-domain <domain>"
+    log_error "Example: --base-domain openshift-node-team.devcluster.openshift.com"
     exit 1
 fi
 

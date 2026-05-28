@@ -120,3 +120,35 @@ bash plugins/cluster-setup/bin/setup.sh \
 # Destroy cluster (auto-detects and removes DRA resources if present)
 bash plugins/cluster-setup/bin/teardown.sh --cluster-name my-test
 ```
+
+## Development
+
+### Updating the Installed Plugin
+
+When you make changes to the source repository, they won't automatically sync to the installed plugin at `~/.claude/plugins/marketplaces/cluster-setup`. To update the installed plugin:
+
+```bash
+# Method 1: Reinstall the plugin
+/plugin uninstall cluster-setup@cluster-setup
+/plugin install cluster-setup@cluster-setup
+
+# Method 2: Manually copy changes
+cp -r plugins/cluster-setup/* ~/.claude/plugins/marketplaces/cluster-setup/plugins/cluster-setup/
+```
+
+### Testing Changes
+
+After making changes:
+
+1. Update the installed plugin (see above)
+2. Test with the cluster-setup skill
+3. Verify documentation is accessible in `references/` directory
+4. Run check-aws-auth.sh to validate the authentication flow
+
+### Key Files to Update
+
+- `plugins/cluster-setup/bin/lib/config.sh` - Default settings (base domain, versions, etc.)
+- `plugins/cluster-setup/skills/cluster-setup/SKILL.md` - Main skill documentation
+- `plugins/cluster-setup/skills/cluster-setup/references/aws-auth.md` - AWS authentication guide
+- `plugins/cluster-setup/bin/check-aws-auth.sh` - AWS credential checker
+- `plugins/cluster-setup/bin/setup.sh` - Main installation script
