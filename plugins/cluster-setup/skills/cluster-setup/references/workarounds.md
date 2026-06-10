@@ -30,20 +30,21 @@ Zone fallback only works within the same region. If all zones exhausted, destroy
 
 A100 GPUs in cloud VM passthrough (GCP a2-highgpu, AWS p4d) do not support `nvidia-smi --gpu-reset`. MIG mode toggling requires a GPU reset, so every MIG mode change requires a **full node reboot**.
 
-The DRA driver's `DestroyUnknownMIGDevices` startup code calls `SetMigMode(DISABLE)` on every restart, creating an unrecoverable loop.
+**DRA driver v0.4.0+ (kubernetes-sigs/dra-driver-nvidia-gpu):** The driver natively detects Ampere (A100) and skips MIG mode toggling. No patched image or keepalive pod needed. The driver respects pre-configured MIG state:
+- MIG disabled → advertises full GPU only
+- MIG enabled → advertises MIG profiles, dynamically creates/destroys instances
+- After last workload removed → cleans up MIG instances, keeps MIG mode enabled
 
-**Automated workaround (setup handles this for A100 on GCP/AWS):**
-1. Use patched DRA driver image (`quay.io/rh-pbhojara/nvidia-driver:v25.12.0-dev-patched`) that skips `DestroyUnknownMIGDevices`
-2. Manually enable MIG via `nvidia-smi -i 0 -mig 1` through the GPU operator driver pod
-3. Reboot the worker node (cordon, drain, reboot, uncordon)
-4. Deploy a keepalive pod (1g.5gb MIG device) to prevent `maybeDisableMigMode` from triggering
+**One-time setup (automated by setup script for A100 on GCP/AWS):**
+1. Enable MIG via `nvidia-smi -i 0 -mig 1` through the GPU operator driver pod
+2. Reboot the worker node (cordon, drain, reboot, uncordon)
+3. DRA driver detects MIG is enabled, advertises all MIG profiles
 
 **Checking MIG status:** `oc exec -n nvidia-gpu-operator <driver-pod> -- nvidia-smi --query-gpu=mig.mode.current,mig.mode.pending --format=csv`
 - `Enabled, Enabled` = stable, ready for MIG workloads
 - `Disabled, Enabled` = pending reboot to activate
-- `Enabled, Disabled` = driver requested disable, needs reboot then re-enable
 
-H100 supports GPU reset natively — no workaround needed.
+H100 supports GPU reset natively — DynamicMIG works fully out of the box, no reboot needed.
 
 ## 5. Manual NFD node labeling
 

@@ -287,7 +287,8 @@ download_openshift_install() {
 # ============================================================
 NFD_CHART_VERSION="${NFD_CHART_VERSION:-0.17.3}"
 GPU_OPERATOR_CHART_VERSION="${GPU_OPERATOR_CHART_VERSION:-v25.10.1}"
-DRA_DRIVER_CHART_VERSION="${DRA_DRIVER_CHART_VERSION:-25.12.0}"
+DRA_DRIVER_CHART_VERSION="${DRA_DRIVER_CHART_VERSION:-0.4.0}"
+DRA_DRIVER_CHART_NAME="${DRA_DRIVER_CHART_NAME:-nvidia/dra-driver-nvidia-gpu}"
 
 # ============================================================
 # DRA Feature Gates (applied to OCP cluster)

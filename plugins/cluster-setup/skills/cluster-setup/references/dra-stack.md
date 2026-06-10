@@ -24,11 +24,15 @@ The feature gate patch uses `customNoUpgrade.enabled` on the cluster featuregate
 
 ## Helm Chart Versions
 
-| Component | Chart Version | Env Override |
-|-----------|--------------|-------------|
-| NFD | 0.17.3 | `--nfd-version` |
-| GPU Operator | v25.10.1 | `--gpu-operator-version` |
-| DRA Driver | 25.12.0 | `--dra-driver-version` |
+| Component | Chart Name | Chart Version | Env Override |
+|-----------|-----------|--------------|-------------|
+| NFD | — | 0.17.3 | `--nfd-version` |
+| GPU Operator | `nvidia/gpu-operator` | v25.10.1 | `--gpu-operator-version` |
+| DRA Driver | `nvidia/dra-driver-nvidia-gpu` | 0.4.0 | `--dra-driver-version` |
+
+The DRA driver moved from `nvidia/nvidia-dra-driver-gpu` (v25.x) to `nvidia/dra-driver-nvidia-gpu` (v0.4.0+) when the project moved to `kubernetes-sigs/dra-driver-nvidia-gpu`.
+
+Container image: `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu`
 
 ## DRA Stack Phases (in order)
 

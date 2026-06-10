@@ -14,7 +14,7 @@ install_dra_driver() {
     # Auto-gate MIG based on GPU capability
     mig_mode=$(get_mig_mode "$gpu" "$mig_mode")
 
-    log_phase "Installing NVIDIA DRA Driver (mode: ${mig_mode})"
+    log_phase "Installing DRA Driver (mode: ${mig_mode})"
 
     local namespace="nvidia-dra-driver-gpu"
 
@@ -26,7 +26,7 @@ install_dra_driver() {
         oc adm policy add-scc-to-user privileged -n "$namespace" -z "$sa" 2>/dev/null || true
     done
 
-    # Ensure nvidia helm repo is available (same repo as GPU operator)
+    # Ensure nvidia helm repo is available
     helm repo add nvidia https://helm.ngc.nvidia.com/nvidia 2>/dev/null || true
     helm repo update nvidia 2>/dev/null || true
 
@@ -43,7 +43,7 @@ install_dra_driver() {
         return 1
     fi
 
-    # Set feature gate overrides based on mode
+    # Set overrides
     local set_overrides="--set gpuResourcesEnabledOverride=true"
     if [[ "$mig_mode" == "timeslicing" ]]; then
         set_overrides="${set_overrides} --set featureGates.DynamicMIG=false --set featureGates.TimeSlicingSettings=true"
@@ -51,22 +51,9 @@ install_dra_driver() {
         set_overrides="${set_overrides} --set featureGates.DynamicMIG=true"
     fi
 
-    # A100 GPUs on cloud VMs do not support GPU reset (nvidia-smi --gpu-reset
-    # returns "Not Supported"). The DRA driver's DestroyUnknownMIGDevices
-    # startup code calls SetMigMode(DISABLE) on every restart, which puts
-    # the GPU into a pending-disable state that requires a reboot to resolve.
-    # This creates an unrecoverable loop. Use the patched image that skips
-    # DestroyUnknownMIGDevices on A100 cloud VMs.
-    # H100 supports GPU reset, so the standard image works fine.
-    local cloud="${3:-}"
-    if [[ "$mig_mode" == "dynamicmig" && "$gpu" == "a100" && -n "$cloud" && ("$cloud" == "gcp" || "$cloud" == "aws") ]]; then
-        log_info "A100 on cloud VM detected: using patched DRA driver image (skips DestroyUnknownMIGDevices)"
-        set_overrides="${set_overrides} --set image.repository=quay.io/rh-pbhojara/nvidia-driver --set image.tag=v25.12.0-dev-patched --set image.pullPolicy=Always"
-    fi
-
-    # Install DRA driver
+    # Install DRA driver (v0.4.0+ uses new chart name)
     # shellcheck disable=SC2086
-    helm install nvidia-dra-driver-gpu nvidia/nvidia-dra-driver-gpu \
+    helm install nvidia-dra-driver-gpu ${DRA_DRIVER_CHART_NAME} \
         --namespace "$namespace" \
         --version "$DRA_DRIVER_CHART_VERSION" \
         -f "$values_file" \
@@ -75,7 +62,7 @@ install_dra_driver() {
     log_success "DRA driver helm chart installed (mode: ${mig_mode})"
 
     # Wait for DRA driver pods
-    wait_for_pods_running "$namespace" "app.kubernetes.io/name=nvidia-dra-driver-gpu" 1200
+    wait_for_pods_running "$namespace" "app.kubernetes.io/name=dra-driver-nvidia-gpu" 1200
 
     # Verify DeviceClass exists
     log_info "Checking for DeviceClass..."
@@ -98,7 +85,9 @@ install_dra_driver() {
 }
 
 # Activate MIG mode on A100 cloud VMs where GPU reset is not supported.
-# Steps: enable MIG (pending), reboot worker to apply, deploy keepalive pod.
+# v0.4.0: patched image and keepalive pod no longer needed.
+# The driver natively skips MIG toggling on Ampere (A100).
+# Only the one-time MIG enable + node reboot is still required.
 activate_mig_cloud_vm() {
     log_phase "Activating MIG Mode (A100 Cloud VM)"
 
@@ -163,7 +152,6 @@ activate_mig_cloud_vm() {
             elapsed=$(( elapsed + 10 ))
         done
 
-        # If we never saw NotReady, the reboot may not have started
         if (( elapsed >= 120 )); then
             log_error "Node did not enter NotReady state within 120s — reboot may have failed"
             return 1
@@ -183,7 +171,6 @@ activate_mig_cloud_vm() {
             elapsed=$(( elapsed + 15 ))
         done
 
-        # Verify node is actually Ready before uncordoning
         local final_ready
         final_ready=$(oc get node "$worker" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
         if [[ "$final_ready" != "True" ]]; then
@@ -193,9 +180,7 @@ activate_mig_cloud_vm() {
 
         oc adm uncordon "$worker"
 
-        # Wait for driver pod to be ready after reboot.
-        # Old pods may still show Running briefly — wait for a pod with
-        # a recent start time by checking container restart count or age.
+        # Wait for driver pod to be ready after reboot
         log_info "Waiting for GPU driver pod to restart..."
         local new_driver_pod=""
         elapsed=0
@@ -203,7 +188,6 @@ activate_mig_cloud_vm() {
             new_driver_pod=$(oc get pods -n nvidia-gpu-operator --no-headers 2>/dev/null \
                 | grep "nvidia-driver-daemonset" | grep -E "2/2\s+Running" | awk '{print $1}' | head -1 || true)
             if [[ -n "$new_driver_pod" ]]; then
-                # Verify we can actually exec into it (confirms it's not a stale pod)
                 if oc exec -n nvidia-gpu-operator "$new_driver_pod" -- nvidia-smi --query-gpu=name --format=csv,noheader &>/dev/null; then
                     break
                 fi
@@ -230,48 +214,5 @@ activate_mig_cloud_vm() {
         log_success "MIG mode activated (Enabled/Enabled)"
     fi
 
-    # Deploy keepalive pod to prevent maybeDisableMigMode from triggering
-    # when all user MIG devices are deleted
-    log_info "Deploying MIG keepalive pod (1g.5gb)..."
-    oc create namespace pd-test 2>/dev/null || true
-
-    oc apply -f - <<'KEEPALIVE_EOF'
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: keepalive-gpu0
-  namespace: pd-test
-spec:
-  devices:
-    requests:
-    - name: keepalive
-      exactly:
-        deviceClassName: mig.nvidia.com
-        selectors:
-        - cel:
-            expression: "device.attributes['gpu.nvidia.com'].profile == '1g.5gb'"
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: keepalive-gpu0
-  namespace: pd-test
-spec:
-  containers:
-  - name: keepalive
-    image: ubuntu:22.04
-    command: ["bash", "-c"]
-    args: ["trap 'exit 0' TERM; sleep infinity & wait"]
-    resources:
-      claims:
-      - name: mig-claim
-  resourceClaims:
-  - name: mig-claim
-    resourceClaimName: keepalive-gpu0
-  restartPolicy: Always
-KEEPALIVE_EOF
-
-    # Wait for keepalive pod
-    oc wait --for=condition=Ready pod/keepalive-gpu0 -n pd-test --timeout=120s 2>/dev/null || true
-    log_success "MIG keepalive pod deployed"
+    log_success "A100 MIG activation complete — DRA driver will advertise MIG profiles"
 }
