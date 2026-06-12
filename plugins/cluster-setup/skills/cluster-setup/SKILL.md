@@ -64,6 +64,9 @@ ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh --cluster-name gpu-test --cloud gcp --gpu t4 
 # GPU cluster with full DRA stack (OCP 4.21+ required)
 ${CLAUDE_PLUGIN_ROOT}/bin/setup.sh --cluster-name dra-test --cloud gcp --gpu t4 --dra --pull-secret ~/pull-secret.json
 
+# Cluster with simulated DRA devices (no GPU needed, for testing)
+${CLAUDE_PLUGIN_ROOT}/bin/setup.sh --cluster-name test --cloud gcp --instance-type n2-standard-4 --dra-example-driver --pull-secret ~/pull-secret.json
+
 # Teardown
 ${CLAUDE_PLUGIN_ROOT}/bin/teardown.sh --cluster-name my-cluster
 ```
@@ -73,6 +76,7 @@ ${CLAUDE_PLUGIN_ROOT}/bin/teardown.sh --cluster-name my-cluster
 | Mode | Flag | Phases | OCP Version |
 |------|------|--------|-------------|
 | No GPU | `--instance-type m6i.xlarge` | Cluster creation only | Any |
+| DRA example | `--dra-example-driver` | Cluster + simulated DRA devices (no GPU) | 4.21+ |
 | GPU hardware only | `--gpu t4` | Cluster + GPU instance + MachineSet patching | Any |
 | GPU + DRA stack | `--gpu t4 --dra` | Cluster + feature gates + cert-manager + NFD + GPU Operator + DRA Driver | 4.21+ |
 
@@ -115,6 +119,7 @@ Detailed guides loaded on demand:
 
 * **AWS Authentication** — [references/aws-auth.md](references/aws-auth.md) — Red Hat SAML-based SSO setup, credential management, troubleshooting
 * **AWS SSO Installation** — [references/aws-sso-installation.md](references/aws-sso-installation.md) — Complete workflow for installing with AWS SSO and restricted IAM roles
+* **DRA Example Driver** — [references/dra-example-driver.md](references/dra-example-driver.md) — Simulated DRA devices for testing without GPU hardware
 * **GPU Matrix** — [references/gpu-matrix.md](references/gpu-matrix.md) — Instance types, zones, quota status, MIG capabilities
 * **DRA Stack** — [references/dra-stack.md](references/dra-stack.md) — Feature gates, version compatibility, helm chart versions, namespaces
 * **Workarounds** — [references/workarounds.md](references/workarounds.md) — A100 MIG on cloud VMs, T4 MachineSet patching, zone fallback, SCC grants

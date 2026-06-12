@@ -13,6 +13,7 @@ source "${LIB_DIR}/cert-manager.sh"
 source "${LIB_DIR}/nfd.sh"
 source "${LIB_DIR}/gpu-operator.sh"
 source "${LIB_DIR}/dra-driver.sh"
+source "${LIB_DIR}/dra-example-driver.sh"
 source "${LIB_DIR}/smoke-test.sh"
 
 # Notify user on failure — cluster may still be running
@@ -58,6 +59,13 @@ GPU/DRA stack (requires OCP 4.21+):
                            Ignored for non-MIG GPUs (T4, L4). Requires --dra.
   --smoke-test             Run smoke test after DRA stack setup. Requires --dra.
 
+DRA example driver (testing without GPU hardware):
+  --dra-example-driver     Install simulated DRA devices (no GPU needed).
+                           Mutually exclusive with --gpu and --dra.
+  --dra-example-version V  Example driver version (default: v0.3.0)
+  --dra-example-devices N  Simulated GPUs per node (default: 8)
+  --dra-example-partitions N  Partitions per GPU (default: 4, 0=disabled)
+
 Optional:
   --base-domain DOMAIN     Base DNS domain for cluster (REQUIRED for AWS, optional for GCP
                            with default: gcp.devcluster.openshift.com)
@@ -89,6 +97,9 @@ Examples:
 
   # GPU-capable instance without GPU (e.g. manual GPU setup later)
   $(basename "$0") --cluster-name bare-gpu --cloud aws --pull-secret ~/.pull-secret.json --instance-type g4dn.xlarge --no-gpu
+
+  # Cluster with simulated DRA devices (no GPU hardware needed)
+  $(basename "$0") --cluster-name dra-test --cloud gcp --instance-type n2-standard-4 --dra-example-driver --pull-secret ~/.pull-secret.json
 EOF
 }
 
@@ -100,6 +111,10 @@ INSTANCE_TYPE=""
 NO_GPU=false
 WORKERS=1
 DRA=false
+DRA_EXAMPLE=false
+DRA_EXAMPLE_VERSION="v0.3.0"
+DRA_EXAMPLE_DEVICES=8
+DRA_EXAMPLE_PARTITIONS=4
 PULL_SECRET=""
 BASE_DOMAIN=""
 MIG_MODE="timeslicing"
@@ -121,6 +136,10 @@ while [[ $# -gt 0 ]]; do
         --no-gpu) NO_GPU=true; shift ;;
         --workers) WORKERS="$2"; shift 2 ;;
         --dra) DRA=true; shift ;;
+        --dra-example-driver) DRA_EXAMPLE=true; shift ;;
+        --dra-example-version) DRA_EXAMPLE_VERSION="$2"; shift 2 ;;
+        --dra-example-devices) DRA_EXAMPLE_DEVICES="$2"; shift 2 ;;
+        --dra-example-partitions) DRA_EXAMPLE_PARTITIONS="$2"; shift 2 ;;
         --pull-secret) PULL_SECRET="$2"; shift 2 ;;
         --base-domain) BASE_DOMAIN="$2"; shift 2 ;;
         --ocp-version) OCP_VERSION="$2"; shift 2 ;;
@@ -187,7 +206,22 @@ if [[ "$CLOUD" == "gcp" && -z "$GCP_PROJECT" ]]; then
     exit 1
 fi
 
-# Need at least --gpu or --instance-type
+# --dra-example-driver: set defaults before instance type validation
+if [[ "$DRA_EXAMPLE" == "true" ]]; then
+    if [[ -n "$GPU" ]]; then
+        log_error "Cannot use both --dra-example-driver and --gpu (example driver provides simulated devices)"
+        exit 1
+    fi
+    if [[ "$DRA" == "true" ]]; then
+        log_error "Cannot use both --dra-example-driver and --dra"
+        exit 1
+    fi
+    if [[ -z "$INSTANCE_TYPE" ]]; then
+        INSTANCE_TYPE=$(get_instance_type "$CLOUD" none)
+    fi
+fi
+
+# Need at least --gpu or --instance-type (--dra-example-driver sets INSTANCE_TYPE above)
 if [[ -z "$GPU" && -z "$INSTANCE_TYPE" ]]; then
     log_error "Either --gpu or --instance-type must be specified"
     usage
@@ -300,7 +334,7 @@ fi
 # --skip-to a DRA phase implies --dra
 if [[ -n "$SKIP_TO" ]]; then
     case "$SKIP_TO" in
-        feature-gates|cert-manager|nfd|gpu-operator|dra-driver|mig-activate|smoke-test)
+        feature-gates|cert-manager|nfd|gpu-operator|dra-driver|mig-activate|smoke-test|example-dra-driver)
             if ! has_gpu; then
                 log_error "Cannot --skip-to ${SKIP_TO}: no GPU selected"
                 exit 1
@@ -383,6 +417,9 @@ if has_dra; then
     fi
 elif has_gpu; then
     echo "  GPU:           ${GPU} (${INSTANCE_TYPE})"
+elif [[ "$DRA_EXAMPLE" == "true" ]]; then
+    echo "  Instance Type: ${INSTANCE_TYPE}"
+    echo "  DRA Example:   yes (${DRA_EXAMPLE_VERSION}, ${DRA_EXAMPLE_DEVICES} GPUs, ${DRA_EXAMPLE_PARTITIONS} partitions)"
 else
     echo "  Instance Type: ${INSTANCE_TYPE}"
 fi
@@ -425,6 +462,8 @@ fi
 # ============================================================
 if has_dra; then
     PHASES=("cluster" "feature-gates" "cert-manager" "nfd" "gpu-operator" "dra-driver" "mig-activate" "smoke-test")
+elif [[ "$DRA_EXAMPLE" == "true" ]]; then
+    PHASES=("cluster" "example-dra-driver")
 else
     PHASES=("cluster")
 fi
@@ -496,6 +535,10 @@ if has_dra; then
     if should_run_phase "smoke-test"; then
         run_smoke_test "$MIG_MODE"
     fi
+elif [[ "$DRA_EXAMPLE" == "true" ]]; then
+    if should_run_phase "example-dra-driver"; then
+        install_example_dra_driver "$DRA_EXAMPLE_VERSION" "$DRA_EXAMPLE_DEVICES" "$DRA_EXAMPLE_PARTITIONS"
+    fi
 elif has_gpu; then
     log_info "GPU hardware provisioned — DRA stack not selected"
 fi
@@ -506,7 +549,7 @@ echo ""
 echo "  Next steps:"
 echo "    export KUBECONFIG=${KUBECONFIG:-${INSTALL_DIR}/auth/kubeconfig}"
 echo "    oc get nodes"
-if has_dra; then
+if has_dra || [[ "$DRA_EXAMPLE" == "true" ]]; then
     echo "    oc get deviceclass"
     echo "    oc get resourceslice"
 elif has_gpu; then

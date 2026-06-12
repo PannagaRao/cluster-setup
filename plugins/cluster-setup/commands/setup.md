@@ -81,7 +81,13 @@ Use `AskUserQuestion` to present categorized options (GPU vs general-purpose) an
 
 Ask user how many worker nodes (default 1). Pass as `--workers N` to setup.sh.
 
-### 1h. GPU Detection and DRA Stack (only for GPU instances)
+### 1h. DRA Example Driver (non-GPU instances only)
+
+**If the user picked a non-GPU instance**, use `AskUserQuestion`: "Install DRA example driver for testing? (simulated GPU devices, no real hardware needed)"
+- **Yes** → pass `--dra-example-driver` to setup.sh. Optionally ask for number of devices and partitions (defaults: 8 GPUs, 4 partitions).
+- **No** → plain cluster
+
+### 1i. GPU Detection and DRA Stack (only for GPU instances)
 
 **If the user picked a GPU instance** (g4dn/p4d/p5/g2/a2/a3, or n1-standard with T4):
 

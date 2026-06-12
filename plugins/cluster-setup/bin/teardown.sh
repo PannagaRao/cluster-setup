@@ -78,6 +78,14 @@ uninstall_resources() {
 
     local has_gpu_resources=false
 
+    # Check for example DRA driver
+    if oc get namespace dra-example-driver &>/dev/null; then
+        has_gpu_resources=true
+        log_info "Uninstalling DRA example driver..."
+        helm uninstall dra-example-driver -n dra-example-driver 2>/dev/null || true
+        delete_namespace dra-example-driver 30
+    fi
+
     # Check if any GPU/DRA namespaces exist
     if oc get namespace nvidia-dra-driver-gpu &>/dev/null; then
         has_gpu_resources=true
