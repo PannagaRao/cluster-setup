@@ -35,7 +35,18 @@ The setup script auto-detects the format.
 - **OCP version**: default `4.21.0`, or the version they want
 - **openshift-install**: Ask the user if they have a specific openshift-install binary. If yes, pass `--openshift-install /path/to/binary`. If no, the script auto-downloads the correct version for the chosen OCP version.
 
-### 1f. Instance Type Selection
+### 1f. Cluster Type
+
+Use `AskUserQuestion`: "What kind of cluster do you need?" with options:
+- **General-purpose** — No GPU, no DRA
+- **GPU cluster** — Real GPU hardware (T4, L4, A100, H100)
+- **DRA testing (no GPU)** — Simulated DRA devices for testing (dra-example-driver)
+
+**If General-purpose** → use default instance type, skip to summary.
+**If GPU cluster** → proceed to step 1g (instance type selection).
+**If DRA testing** → pass `--dra-example-driver`, optionally ask for device/partition count, skip to summary.
+
+### 1g. Instance Type Selection (GPU clusters only)
 
 Query available machine types from the cloud provider, filtered to common families:
 
@@ -81,13 +92,7 @@ Use `AskUserQuestion` to present categorized options (GPU vs general-purpose) an
 
 Ask user how many worker nodes (default 1). Pass as `--workers N` to setup.sh.
 
-### 1h. DRA Example Driver (non-GPU instances only)
-
-**If the user picked a non-GPU instance**, use `AskUserQuestion`: "Install DRA example driver for testing? (simulated GPU devices, no real hardware needed)"
-- **Yes** → pass `--dra-example-driver` to setup.sh. Optionally ask for number of devices and partitions (defaults: 8 GPUs, 4 partitions).
-- **No** → plain cluster
-
-### 1i. GPU Detection and DRA Stack (only for GPU instances)
+### 1i. GPU Detection and DRA Stack (only for GPU clusters)
 
 **If the user picked a GPU instance** (g4dn/p4d/p5/g2/a2/a3, or n1-standard with T4):
 
