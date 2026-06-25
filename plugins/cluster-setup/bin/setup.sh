@@ -536,6 +536,12 @@ if has_dra; then
         run_smoke_test "$MIG_MODE"
     fi
 elif [[ "$DRA_EXAMPLE" == "true" ]]; then
+    # Enable DRA feature gates for example driver (same gates as NVIDIA DRA stack)
+    log_info "Enabling DRA feature gates for example driver"
+    if (( DRA_EXAMPLE_PARTITIONS > 0 )); then
+        DRA_FEATURE_GATES+=("DRAPartitionableDevices=true")
+    fi
+    enable_dra_feature_gates "timeslicing"
     if should_run_phase "example-dra-driver"; then
         install_example_dra_driver "$DRA_EXAMPLE_VERSION" "$DRA_EXAMPLE_DEVICES" "$DRA_EXAMPLE_PARTITIONS"
     fi
