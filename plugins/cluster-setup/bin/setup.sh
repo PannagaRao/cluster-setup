@@ -69,7 +69,7 @@ DRA example driver (testing without GPU hardware):
 Optional:
   --base-domain DOMAIN     Base DNS domain for cluster (REQUIRED for AWS, optional for GCP
                            with default: gcp.devcluster.openshift.com)
-  --ocp-version VERSION    OpenShift version (default: 4.21.0)
+  --ocp-version VERSION    OpenShift version (default: 4.22.0)
   --openshift-install PATH Path to openshift-install binary (auto-downloaded if not found)
   --region REGION          Cloud region (auto-selected if not specified)
   --worker-zone ZONE       Worker node zone (auto-selected if not specified)

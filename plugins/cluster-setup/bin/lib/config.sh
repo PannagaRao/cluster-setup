@@ -187,7 +187,7 @@ AWS_CONTROL_PLANE_TYPE="${AWS_CONTROL_PLANE_TYPE:-m6i.xlarge}"
 # ============================================================
 # OpenShift
 # ============================================================
-OCP_VERSION="${OCP_VERSION:-4.21.0}"
+OCP_VERSION="${OCP_VERSION:-4.22.0}"
 OPENSHIFT_INSTALL="${OPENSHIFT_INSTALL:-}"
 # PLUGIN_ROOT: two levels up from bin/lib/ — works both locally and as installed plugin
 PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
