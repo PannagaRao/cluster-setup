@@ -35,20 +35,9 @@ The setup script auto-detects the format.
 - **OCP version**: default `4.21.0`, or the version they want
 - **openshift-install**: Ask the user if they have a specific openshift-install binary. If yes, pass `--openshift-install /path/to/binary`. If no, the script auto-downloads the correct version for the chosen OCP version.
 
-### 1f. Cluster Type
+### 1f. Instance Type Selection
 
-Use `AskUserQuestion`: "What kind of cluster do you need?" with options:
-- **General-purpose** — No GPU, no DRA
-- **GPU cluster** — Real GPU hardware (T4, L4, A100, H100)
-- **DRA testing (no GPU)** — Simulated DRA devices for testing (dra-example-driver)
-
-**If General-purpose** → use default instance type, skip to summary.
-**If GPU cluster** → proceed to step 1g (instance type selection).
-**If DRA testing** → pass `--dra-example-driver`, optionally ask for device/partition count, skip to summary.
-
-### 1g. Instance Type Selection (GPU clusters only)
-
-Query available machine types from the cloud provider, filtered to common families:
+Query available machine types from the cloud provider:
 
 **AWS:**
 ```bash
@@ -67,55 +56,43 @@ gcloud compute machine-types list \
   --sort-by=guestCpus
 ```
 
-If the cloud CLI command fails (e.g. not authenticated), fall back to presenting the known instance types:
+If the cloud CLI command fails, fall back to presenting known instance types:
 
-**GPU instances (from GPU matrix):**
-| Cloud | Instance | GPU | GPUs | vCPUs |
-|-------|----------|-----|------|-------|
-| AWS | g4dn.xlarge | T4 | 1 | 4 |
-| AWS | p4d.24xlarge | A100 | 8 | 96 |
-| AWS | p5.4xlarge | H100 | 1 | 16 |
-| GCP | g2-standard-8 | L4 | 1 | 8 |
-| GCP | a2-highgpu-1g | A100 | 1 | 12 |
-| GCP | a3-highgpu-1g | H100 | 1 | 26 |
-| GCP | n1-standard-8 | T4 (accelerator) | 1 | 8 |
+| Cloud | Instance | GPU | vCPUs |
+|-------|----------|-----|-------|
+| AWS | m6i.xlarge | — | 4 |
+| AWS | g4dn.xlarge | T4 | 4 |
+| AWS | p4d.24xlarge | A100 | 96 |
+| AWS | p5.4xlarge | H100 | 16 |
+| GCP | n2-standard-4 | — | 4 |
+| GCP | n1-standard-8 | T4 (accelerator) | 8 |
+| GCP | g2-standard-8 | L4 | 8 |
+| GCP | a2-highgpu-1g | A100 | 12 |
+| GCP | a3-highgpu-1g | H100 | 26 |
 
-**General-purpose defaults:**
-| Cloud | Instance | vCPUs | Memory |
-|-------|----------|-------|--------|
-| AWS | m6i.xlarge | 4 | 16 GB |
-| GCP | n2-standard-4 | 4 | 16 GB |
+Present the list and let the user pick.
 
-Use `AskUserQuestion` to present categorized options (GPU vs general-purpose) and let the user pick.
+### 1g. DRA Stack (OCP 4.21+ only)
 
-### 1g. Worker Count
+**If OCP >= 4.21**, use `AskUserQuestion`: "Do you want a DRA stack on this cluster?" with options:
+- **No** — Plain cluster, skip to worker count
+- **Yes** — Then ask which DRA stack
+
+**If Yes**, use `AskUserQuestion`: "Which DRA stack?" with options:
+- **DRA example driver (Recommended)** — Simulated devices, no GPU hardware needed, fast to set up
+- **NVIDIA GPU DRA** — Real GPU stack (feature gates, cert-manager, NFD, GPU Operator, DRA Driver). Requires a GPU instance type.
+
+**If DRA example driver** → pass `--dra-example-driver`. Optionally ask for device/partition count (defaults: 8 GPUs, 4 partitions).
+
+**If NVIDIA GPU DRA** → check if the selected instance type has a GPU. If not, ask the user to switch to a GPU instance. Pass `--gpu <type> --dra`.
+
+**If OCP < 4.21**: skip this step entirely.
+
+### 1h. Worker Count
 
 Ask user how many worker nodes (default 1). Pass as `--workers N` to setup.sh.
 
-### 1i. GPU Detection and DRA Stack (only for GPU clusters)
-
-**If the user picked a GPU instance** (g4dn/p4d/p5/g2/a2/a3, or n1-standard with T4):
-
-Auto-detect the GPU type from the instance family:
-- AWS: `g4dn.*` -> T4, `p4d.*` -> A100, `p5.*` -> H100
-- GCP: `g2-*` -> L4, `a2-*` -> A100, `a3-*` -> H100
-- GCP `n1-standard-*`: Ask "Do you want to attach a T4 GPU accelerator?"
-
-Tell the user what GPU was detected.
-
-**DRA stack prompt (only when OCP >= 4.21):**
-
-Parse the OCP version from step 1e. If the minor version is >= 21:
-
-Use `AskUserQuestion`: **"Install the NVIDIA DRA stack?"** with options:
-- **Yes** — Feature gates, cert-manager, NFD, GPU Operator, DRA Driver → proceed to step 1h, pass `--dra`
-- **No** — GPU hardware only, no operators → skip to summary
-
-**If OCP < 4.21:** Do NOT ask about DRA. The DRA stack requires OCP 4.21+ (K8s 1.34+, `resource.k8s.io/v1`). Just proceed with GPU hardware only (`--gpu <type>` without `--dra`).
-
-**If the user picked a non-GPU instance**: skip this step entirely, proceed to summary.
-
-### 1i. GPU+DRA Configuration (only if DRA stack requested and OCP >= 4.21)
+### 1i. GPU+DRA Configuration (only if NVIDIA GPU DRA selected)
 
 Apply all GPU knowledge from the repo:
 
@@ -133,23 +110,16 @@ T4/L4: skip this question (not MIG-capable).
 
 **A100 + DynamicMIG warning** (if selected):
 
-> **A100 DynamicMIG Limitation on Cloud VMs:**
+> **A100 DynamicMIG on Cloud VMs:**
 >
-> A100 GPUs on cloud VMs (GCP/AWS) do not support GPU reset (`nvidia-smi --gpu-reset` returns "Not Supported"). DynamicMIG requires GPU reset to toggle MIG mode. This means:
-> - Every MIG mode change requires a **full node reboot** (~5 min downtime)
-> - A **patched DRA driver image** is needed to prevent the driver from disabling MIG on restart
-> - A **keepalive pod** must run permanently to prevent MIG from being disabled when all workloads are removed
->
-> The setup script handles all of this automatically, but be aware of the reboot during setup.
->
-> **Alternatives:**
-> 1. **H100** -- supports GPU reset natively, DynamicMIG works without workarounds
-> 2. **A100 with timeslicing** -- no MIG partitioning, but avoids the GPU reset issue entirely
+> A100 GPUs on cloud VMs require a one-time node reboot to enable MIG mode (GPU reset not supported).
+> The DRA driver v0.4.0+ handles A100 natively — no patched images or keepalive pods needed.
+> The setup script automates the MIG enable + reboot. H100 needs no reboot.
 >
 Use `AskUserQuestion`: "How to proceed?" with options:
-- **Proceed with A100 + DynamicMIG** — Workarounds applied automatically
-- **Switch to H100** — Native GPU reset, no workarounds
-- **Use timeslicing instead** — No MIG partitioning
+- **Proceed with A100 + DynamicMIG** — One-time node reboot during setup
+- **Switch to H100** — No reboot needed
+- **Skip DynamicMIG** — No MIG partitioning
 
 **Component versions** (from config.sh defaults, user can override):
 - NFD: 0.17.3 (`--nfd-version`)
